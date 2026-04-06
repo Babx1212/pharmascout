@@ -42,7 +42,6 @@ exports.handler = async (event) => {
 
     // Extraction des noms de produits et statuts
     const products = [];
-    // Pattern pour les titres de médicaments dans les résultats EMA
     const titlePattern = /<h3[^>]*class="[^"]*views-field[^"]*"[^>]*>[\s\S]*?<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
     let m;
     while ((m = titlePattern.exec(html)) !== null && products.length < 8) {
@@ -66,31 +65,103 @@ exports.handler = async (event) => {
       }
     }
 
-    // 2. Recherche PRAC referrals actifs
-    const referralUrl = `https://www.ema.europa.eu/en/medicines/human/referrals/${encodeURIComponent(substance.replace(/\s+/g, '-'))}`;
+    // 2. Recherche PRAC — plusieurs stratégies en parallèle
     let pracActive = false;
     let pracDetails = null;
+    let pracUrl = null;
+
+    // Stratégie A : referral formel dédié (ex: ibuprofen, valproate)
+    const referralSlug = substance.replace(/\s+/g, '-');
+    const referralUrl = `https://www.ema.europa.eu/en/medicines/human/referrals/${encodeURIComponent(referralSlug)}`;
     try {
       const pracHtml = await fetchUrl(referralUrl);
-      if (pracHtml.includes('referral') && !pracHtml.includes('404') && !pracHtml.includes('Page not found')) {
+      if (!pracHtml.includes('Page not found') && !pracHtml.includes('404') &&
+          pracHtml.includes(substance.substring(0, 5))) {
         pracActive = true;
         const titleMatch = pracHtml.match(/<h1[^>]*>([\s\S]*?)<\/h1>/);
         if (titleMatch) pracDetails = titleMatch[1].replace(/<[^>]+>/g, '').trim();
+        pracUrl = referralUrl;
       }
-    } catch (_) { /* pas de referral trouvé */ }
-
-    // 3. Vérifier dans la liste de référencements EMA
-    const referralListUrl = 'https://www.ema.europa.eu/en/medicines/human/referrals';
-    let referralMentions = 0;
-    try {
-      const listHtml = await fetchUrl(referralListUrl);
-      // Compte les mentions de la substance dans la liste des referrals
-      const subLower = substance.toLowerCase();
-      const regex = new RegExp(subLower.substring(0, Math.min(8, subLower.length)), 'gi');
-      const matches = listHtml.match(regex) || [];
-      referralMentions = matches.length;
-      if (referralMentions > 0 && !pracActive) pracActive = true;
     } catch (_) {}
+
+    // Stratégie B : signaux de sécurité PRAC (ex: finasteride, isotretinoin)
+    // La section "signals" couvre les évaluations de signaux de pharmacovigilance
+    if (!pracActive) {
+      try {
+        const signalsUrl = `https://www.ema.europa.eu/en/medicines/human/signals/${encodeURIComponent(referralSlug)}`;
+        const sigHtml = await fetchUrl(signalsUrl);
+        if (!sigHtml.includes('Page not found') && !sigHtml.includes('404') &&
+            sigHtml.toLowerCase().includes(substance.substring(0, 5))) {
+          pracActive = true;
+          const titleMatch = sigHtml.match(/<h1[^>]*>([\s\S]*?)<\/h1>/);
+          if (titleMatch) pracDetails = titleMatch[1].replace(/<[^>]+>/g, '').trim();
+          pracUrl = signalsUrl;
+        }
+      } catch (_) {}
+    }
+
+    // Stratégie C : recherche full-text EMA pour PRAC + substance
+    // Couvre les cas où la page n'est pas indexée par nom exact
+    if (!pracActive) {
+      try {
+        const ftsUrl = `https://www.ema.europa.eu/en/search?search_api_fulltext=${encodeURIComponent(substance + ' PRAC')}`;
+        const ftsHtml = await fetchUrl(ftsUrl);
+        const subLower = substance.toLowerCase();
+        const subShort = subLower.substring(0, Math.min(6, subLower.length));
+        // Chercher des résultats de type signal/PRAC dans les résultats de recherche
+        const hasPRAC = /prac|signal|referral|pharmacovigilance/i.test(ftsHtml);
+        const hasSubstance = new RegExp(subShort, 'i').test(ftsHtml);
+        if (hasPRAC && hasSubstance) {
+          // Vérifier qu'il y a bien un lien vers un signal/referral spécifique
+          const signalLinkMatch = ftsHtml.match(/href="(\/en\/medicines\/human\/(?:signals|referrals)\/[^"]+)"/i);
+          if (signalLinkMatch) {
+            pracActive = true;
+            pracUrl = 'https://www.ema.europa.eu' + signalLinkMatch[1];
+            // Essayer de récupérer le titre de la page du signal
+            try {
+              const sigPageHtml = await fetchUrl(pracUrl);
+              const titleMatch = sigPageHtml.match(/<h1[^>]*>([\s\S]*?)<\/h1>/);
+              if (titleMatch) pracDetails = titleMatch[1].replace(/<[^>]+>/g, '').trim();
+            } catch (_) {}
+          }
+        }
+      } catch (_) {}
+    }
+
+    // Stratégie D : liste des signaux EMA (page principale signals)
+    let referralMentions = 0;
+    if (!pracActive) {
+      try {
+        const signalsListUrl = `https://www.ema.europa.eu/en/medicines/human/signals`;
+        const listHtml = await fetchUrl(signalsListUrl);
+        const subShort = substance.substring(0, Math.min(8, substance.length));
+        const regex = new RegExp(subShort, 'gi');
+        const matches = listHtml.match(regex) || [];
+        referralMentions = matches.length;
+        if (referralMentions > 0) {
+          pracActive = true;
+          // Tenter de trouver le lien vers le signal dans la liste
+          const linkRegex = new RegExp(`href="(/en/medicines/human/signals/[^"]*${subShort.substring(0,4)}[^"]*)"`, 'i');
+          const linkMatch = listHtml.match(linkRegex);
+          if (linkMatch) pracUrl = 'https://www.ema.europa.eu' + linkMatch[1];
+        }
+      } catch (_) {}
+    }
+
+    // Stratégie E : liste des referrals EMA (page principale referrals)
+    if (!pracActive) {
+      try {
+        const referralListUrl = 'https://www.ema.europa.eu/en/medicines/human/referrals';
+        const listHtml = await fetchUrl(referralListUrl);
+        const subShort = substance.substring(0, Math.min(8, substance.length));
+        const regex = new RegExp(subShort, 'gi');
+        const matches = listHtml.match(regex) || [];
+        if (matches.length > 0) {
+          referralMentions += matches.length;
+          pracActive = true;
+        }
+      } catch (_) {}
+    }
 
     return {
       statusCode: 200,
@@ -101,6 +172,7 @@ exports.handler = async (event) => {
         products: products.slice(0, 6),
         pracActive,
         pracDetails,
+        pracUrl,
         referralMentions,
         searchUrl
       })
@@ -124,7 +196,6 @@ function fetchUrl(url, timeout = 10000) {
         'Accept-Language': 'en-US,en;q=0.9'
       }
     }, (res) => {
-      // Suivre les redirections
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         fetchUrl(res.headers.location, timeout).then(resolve).catch(reject);
         return;
