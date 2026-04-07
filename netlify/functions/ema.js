@@ -1,10 +1,19 @@
 /**
- * PharmaScout — Netlify Function : EMA Proxy
- * Recherche les médicaments autorisés par l'EMA pour une substance donnée.
- * Retourne : nombre de produits EU, noms, statut, référencements PRAC.
+ * PharmaScout — Netlify Function : EMA Proxy (v4)
+ * Utilise les JSON data files officiels de l'EMA (mis à jour 2x/jour).
+ * - Referrals JSON : 709 KB, contient tous les referrals PRAC
+ * - DHPCs JSON    : communications directes professionnels de santé
+ * Cache module-level (persist entre invocations warm Lambda).
  */
 
 const https = require('https');
+
+const EMA_REFERRALS_URL = 'https://www.ema.europa.eu/en/documents/report/referrals-output-json-report_en.json';
+const EMA_DHPC_URL      = 'https://www.ema.europa.eu/en/documents/report/dhpc-output-json-report_en.json';
+
+// Cache module-level (warm Lambda instances)
+let _cache = { referrals: null, dhpcs: null, ts: 0 };
+const CACHE_TTL = 6 * 60 * 60 * 1000; // 6h
 
 const HEADERS = {
   'Content-Type': 'application/json',
@@ -23,206 +32,106 @@ exports.handler = async (event) => {
   }
 
   try {
-    // 1. Recherche EMA — page produits humains
-    const searchUrl = `https://www.ema.europa.eu/en/medicines/field_ema_web_categories%253Aname_field/Human/search_api_fulltext/${encodeURIComponent(substance)}`;
-    const html = await fetchUrl(searchUrl);
-
-    // Extraction du nombre de résultats
-    const countPatterns = [
-      /(\d+)\s+results?\s+found/i,
-      /Showing[\s\S]{0,30}of\s+(\d+)/i,
-      /(\d+)\s+medicine/i,
-      /"count"\s*:\s*(\d+)/
-    ];
-    let total = 0;
-    for (const pattern of countPatterns) {
-      const m = html.match(pattern);
-      if (m) { total = parseInt(m[1]); break; }
+    // --- 1. Charger / rafraîchir le cache EMA ---
+    const now = Date.now();
+    if (!_cache.referrals || (now - _cache.ts) > CACHE_TTL) {
+      const [refData, dhpcData] = await Promise.all([
+        fetchJson(EMA_REFERRALS_URL, 25000),
+        fetchJson(EMA_DHPC_URL, 25000).catch(() => ({ data: [] }))
+      ]);
+      _cache.referrals = (refData && refData.data) ? refData.data : [];
+      _cache.dhpcs     = (dhpcData && dhpcData.data) ? dhpcData.data : [];
+      _cache.ts = now;
     }
 
-    // Extraction des noms de produits et statuts
-    const products = [];
-    const titlePattern = /<h3[^>]*class="[^"]*views-field[^"]*"[^>]*>[\s\S]*?<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
-    let m;
-    while ((m = titlePattern.exec(html)) !== null && products.length < 8) {
-      const name = m[2].replace(/<[^>]+>/g, '').trim();
-      if (name && name.length > 2) {
-        products.push({
-          name,
-          url: m[1].startsWith('/') ? 'https://www.ema.europa.eu' + m[1] : m[1]
-        });
-      }
-    }
-    if (products.length === 0) {
-      const altPattern = /class="[^"]*field-content[^"]*"[^>]*>[\s\S]*?<a[^>]+>([\s\S]*?)<\/a>/g;
-      while ((m = altPattern.exec(html)) !== null && products.length < 8) {
-        const name = m[1].replace(/<[^>]+>/g, '').trim();
-        if (name && name.toLowerCase().includes(substance.substring(0, 5))) {
-          products.push({ name });
-        }
-      }
+    // --- 2. Construire les mots-clés de recherche ---
+    // Décompose la substance en mots (ex: "finasteride" → ["finasteride"])
+    // Tolère les substances composées (ex: "finasteride dutasteride")
+    const substanceClean = substance.replace(/[^a-z0-9\s]/g, ' ').trim();
+    const keywords = [...new Set(
+      substanceClean.split(/\s+/).filter(w => w.length >= 4)
+    )];
+    if (keywords.length === 0) keywords.push(substanceClean);
+
+    function matchesSubstance(text) {
+      const t = (text || '').toLowerCase();
+      return keywords.some(k => t.includes(k));
     }
 
-    // 2. Recherche PRAC — plusieurs stratégies
-    let pracActive = false;
-    let pracDetails = null;
-    let pracUrl = null;
-    let referralMentions = 0;
+    // --- 3. Recherche dans les Referrals ---
+    const matchingReferrals = _cache.referrals.filter(r => {
+      if (r.category !== 'Human') return false;
+      return matchesSubstance(r.international_non_proprietary_name_inn_common_name)
+          || matchesSubstance(r.referral_name);
+    });
 
-    const subShort = substance.substring(0, Math.min(5, substance.length));
-    const referralSlug = substance.replace(/\s+/g, '-');
+    // Trier : safety referrals en premier, puis par date de décision (plus récent)
+    matchingReferrals.sort((a, b) => {
+      if (a.safety_referral === 'Yes' && b.safety_referral !== 'Yes') return -1;
+      if (a.safety_referral !== 'Yes' && b.safety_referral === 'Yes') return 1;
+      return (b.european_commission_decision_date || '').localeCompare(a.european_commission_decision_date || '');
+    });
 
-    // Helper : extraire toute URL de referral/signal de la page (HTTP ou JS redirect)
-    function extractPracUrlFromHtml(pageHtml) {
-      // Canonical URL
-      const canonical = pageHtml.match(/<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/i)
-        || pageHtml.match(/<link[^>]+href=["']([^"']+)["'][^>]+rel=["']canonical["']/i);
-      if (canonical && (canonical[1].includes('/referrals/') || canonical[1].includes('/signals/'))) {
-        return canonical[1].startsWith('http') ? canonical[1] : 'https://www.ema.europa.eu' + canonical[1];
-      }
-      // og:url
-      const ogUrl = pageHtml.match(/<meta[^>]+property=["']og:url["'][^>]+content=["']([^"']+)["']/i)
-        || pageHtml.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:url["']/i);
-      if (ogUrl && (ogUrl[1].includes('/referrals/') || ogUrl[1].includes('/signals/'))) {
-        return ogUrl[1].startsWith('http') ? ogUrl[1] : 'https://www.ema.europa.eu' + ogUrl[1];
-      }
-      // Meta refresh
-      const metaRefresh = pageHtml.match(/<meta[^>]+http-equiv=["'refresh["'][^>]+content=["'][^"']*url=([^"']+)["']/i)
-      if (metaRefresh && (metaRefresh[1].includes('/referrals/') || metaRefresh[1].includes('/signals/'))) {
-        return metaRefresh[1].startsWith('http') ? metaRefresh[1] : 'https://www.ema.europa.eu' + metaRefresh[1];
-      }
-      // JS window.location redirect
-      const jsRedirect = pageHtml.match(/window\.location(?:\.href)?\s*=\s*["']([^"']+(?:referrals|signals)[^"']+)["']/i)
-      if (jsRedirect) {
-        return jsRedirect[1].startsWith('http') ? jsRedirect[1] : 'https://www.ema.europa.eu' + jsRedirect[1];
-      }
-      // Lien direct vers referral/signal dans la page
-      const directLink = pageHtml.match(/href=["']((?:https:\/\/www\.ema\.europa\.eu)?\/en\/medicines\/human\/(?:referrals|signals)\/[^"']+)["']/i);
-      if (directLink) {
-        return directLink[1].startsWith('http') ? directLink[1] : 'https://www.ema.europa.eu' + directLink[1];
-      }
-      return null;
-    }
+    const pracActive  = matchingReferrals.length > 0;
+    const mainRef     = matchingReferrals[0] || null;
+    const safetyRefs  = matchingReferrals.filter(r => r.safety_referral === 'Yes');
 
-    // Stratégie A : referral formel avec slug exact
-    if (!pracActive) {
-      try {
-        const url = `https://www.ema.europa.eu/en/medicines/human/referrals/${encodeURIComponent(referralSlug)}`;
-        const { html: pracHtml, finalUrl } = await fetchUrlWithFinalUrl(url);
-        if (!pracHtml.toLowerCase().includes('not found') && pracHtml.toLowerCase().includes(subShort)) {
-          pracActive = true;
-          const titleMatch = pracHtml.match(/<h1[^>]*>([\s\S]*?)<\/h1>/);
-          if (titleMatch) pracDetails = titleMatch[1].replace(/<[^>]+>/g, '').trim();
-          pracUrl = finalUrl || url;
-        }
-      } catch (_) {}
-    }
+    // --- 4. Recherche dans les DHPCs ---
+    const matchingDhpcs = _cache.dhpcs.filter(d => {
+      return matchesSubstance(d.active_substances)
+          || matchesSubstance(d.name_of_medicine);
+    }).map(d => ({
+      name:     d.name_of_medicine   || '',
+      url:      d.dhpc_url           || '',
+      date:     d.dissemination_date || '',
+      outcome:  d.regulatory_outcome || '',
+      type:     d.dhpc_type          || ''
+    }));
 
-    // Stratégie B : signal avec slug exact
-    if (!pracActive) {
-      try {
-        const url = `https://www.ema.europa.eu/en/medicines/human/signals/${encodeURIComponent(referralSlug)}`;
-        const { html: sigHtml, finalUrl } = await fetchUrlWithFinalUrl(url);
-        if (!sigHtml.toLowerCase().includes('not found') && sigHtml.toLowerCase().includes(subShort)) {
-          pracActive = true;
-          const titleMatch = sigHtml.match(/<h1[^>]*>([\s\S]*?)<\/h1>/);
-          if (titleMatch) pracDetails = titleMatch[1].replace(/<[^>]+>/g, '').trim();
-          pracUrl = finalUrl || url;
-        }
-      } catch (_) {}
-    }
-
-    // Stratégie C : recherche EMA referrals (gère HTTP et JS redirects, slugs composés)
-    if (!pracActive) {
-      try {
-        const searchReferralUrl = `https://www.ema.europa.eu/en/medicines/human/referrals?search_api_fulltext=${encodeURIComponent(substance)}`;
-        const { html: refHtml, finalUrl } = await fetchUrlWithFinalUrl(searchReferralUrl);
-        // Vérifier si on a bien du contenu pertinent
-        const hasSubstance = refHtml.toLowerCase().includes(subShort);
-        const notFound = refHtml.toLowerCase().includes('not found');
-        if (!notFound && hasSubstance) {
-          // Extraire l'URL du referral depuis le HTML (HTTP redirect, JS redirect, canonical, lien direct...)
-          const foundUrl = extractPracUrlFromHtml(refHtml);
-          // Ou vérifier si finalUrl est déjà une page referral
-          const isRedirectedPage = finalUrl && finalUrl.includes('/referrals/') && !finalUrl.endsWith('/referrals');
-          if (foundUrl || isRedirectedPage) {
-            pracActive = true;
-            pracUrl = foundUrl || finalUrl;
-            const titleMatch = refHtml.match(/<h1[^>]*>([\s\S]*?)<\/h1>/);
-            if (titleMatch) pracDetails = titleMatch[1].replace(/<[^>]+>/g, '').trim();
-            // Si le titre est vide (page de résultats, pas la page referral), fetcher la page referral
-            if ((!pracDetails || pracDetails.length < 5) && pracUrl) {
-              try {
-                const refPage = await fetchUrl(pracUrl);
-                const t = refPage.match(/<h1[^>]*>([\s\S]*?)<\/h1>/);
-                if (t) pracDetails = t[1].replace(/<[^>]+>/g, '').trim();
-              } catch (_) {}
-            }
-          }
-        }
-      } catch (_) {}
-    }
-
-    // Stratégie D : recherche EMA signals (gère HTTP et JS redirects)
-    if (!pracActive) {
-      try {
-        const searchSignalUrl = `https://www.ema.europa.eu/en/medicines/human/signals?search_api_fulltext=${encodeURIComponent(substance)}`;
-        const { html: sigHtml, finalUrl } = await fetchUrlWithFinalUrl(searchSignalUrl);
-        const hasSubstance = sigHtml.toLowerCase().includes(subShort);
-        const notFound = sigHtml.toLowerCase().includes('not found');
-        if (!notFound && hasSubstance) {
-          const foundUrl = extractPracUrlFromHtml(sigHtml);
-          const isRedirectedPage = finalUrl && finalUrl.includes('/signals/') && !finalUrl.endsWith('/signals');
-          if (foundUrl || isRedirectedPage) {
-            pracActive = true;
-            pracUrl = foundUrl || finalUrl;
-            const titleMatch = sigHtml.match(/<h1[^>]*>([\s\S]*?)<\/h1>/);
-            if (titleMatch) pracDetails = titleMatch[1].replace(/<[^>]+>/g, '').trim();
-            if ((!pracDetails || pracDetails.length < 5) && pracUrl) {
-              try {
-                const sigPage = await fetchUrl(pracUrl);
-                const t = sigPage.match(/<h1[^>]*>([\s\S]*?)<\/h1>/);
-                if (t) pracDetails = t[1].replace(/<[^>]+>/g, '').trim();
-              } catch (_) {}
-            }
-          }
-        }
-      } catch (_) {}
-    }
-
-    // Stratégie E : recherche full-text EMA (fallback général)
-    if (!pracActive) {
-      try {
-        const ftsUrl = `https://www.ema.europa.eu/en/search?search_api_fulltext=${encodeURIComponent(substance + ' referral')}`;
-        const ftsHtml = await fetchUrl(ftsUrl);
-        const hasSubstance = new RegExp(subShort, 'i').test(ftsHtml);
-        if (hasSubstance) {
-          const foundUrl = extractPracUrlFromHtml(ftsHtml);
-          if (foundUrl) {
-            pracActive = true;
-            pracUrl = foundUrl;
-            try {
-              const sigPageHtml = await fetchUrl(pracUrl);
-              const titleMatch = sigPageHtml.match(/<h1[^>]*>([\s\S]*?)<\/h1>/);
-              if (titleMatch) pracDetails = titleMatch[1].replace(/<[^>]+>/g, '').trim();
-            } catch (_) {}
-          }
-        }
-      } catch (_) {}
-    }
-
+    // --- 5. Construire la réponse ---
     return {
       statusCode: 200,
       headers: HEADERS,
       body: JSON.stringify({
         substance,
-        totalEUProducts: total,
-        products: products.slice(0, 6),
+
+        // Produits centralement autorisés par l'EMA (molécules nationales = 0, c'est correct)
+        totalEUProducts: 0,
+        products: [],
+
+        // Signal de sécurité PRAC
         pracActive,
-        pracDetails,
-        pracUrl,
-        referralMentions,
-        searchUrl
+        pracDetails:        mainRef ? mainRef.referral_name                        : null,
+        pracUrl:            mainRef ? mainRef.referral_url                         : null,
+        pracStatus:         mainRef ? mainRef.current_status                       : null,
+        pracRecommendation: mainRef ? mainRef.prac_recommendation                  : null,
+        pracDecisionDate:   mainRef ? mainRef.european_commission_decision_date    : null,
+        pracType:           mainRef ? mainRef.referral_type                        : null,
+        isSafetyReferral:   mainRef ? (mainRef.safety_referral === 'Yes')          : false,
+
+        // Tous les referrals correspondants
+        allReferrals: matchingReferrals.map(r => ({
+          name:            r.referral_name,
+          url:             r.referral_url,
+          inn:             r.international_non_proprietary_name_inn_common_name,
+          status:          r.current_status,
+          type:            r.referral_type,
+          isSafety:        r.safety_referral === 'Yes',
+          recommendation:  r.prac_recommendation,
+          startDate:       r.procedure_start_date,
+          decisionDate:    r.european_commission_decision_date
+        })),
+
+        // DHPCs (communications sécurité)
+        dhpcs: matchingDhpcs,
+        hasDhpc: matchingDhpcs.length > 0,
+
+        referralMentions: matchingReferrals.length,
+        safetyReferralCount: safetyRefs.length,
+
+        // Lien de recherche EMA
+        searchUrl: `https://www.ema.europa.eu/en/search?search_api_fulltext=${encodeURIComponent(substance)}`,
+        cacheAge: Math.round((now - _cache.ts) / 1000 / 60) // minutes
       })
     };
 
@@ -235,31 +144,46 @@ exports.handler = async (event) => {
   }
 };
 
-function fetchUrlWithFinalUrl(url, timeout = 12000) {
+/**
+ * Télécharge et parse un fichier JSON depuis une URL HTTPS.
+ * Suit les redirections HTTP 3xx.
+ */
+function fetchJson(url, timeout = 20000) {
   return new Promise((resolve, reject) => {
     const req = https.get(url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (compatible; PharmaScout/1.0)',
-        'Accept': 'text/html,application/json',
-        'Accept-Language': 'en-US,en;q=0.9'
+        'Accept':     'application/json, */*'
       }
     }, (res) => {
+      // Suivre les redirections
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        const redirectUrl = res.headers.location.startsWith('http')
-          ? res.headers.location
-          : 'https://www.ema.europa.eu' + res.headers.location;
-        fetchUrlWithFinalUrl(redirectUrl, timeout).then(resolve).catch(reject);
+        const loc = res.headers.location;
+        const next = loc.startsWith('http') ? loc : 'https://www.ema.europa.eu' + loc;
+        res.resume();
+        fetchJson(next, timeout).then(resolve).catch(reject);
         return;
       }
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => resolve({ html: data, finalUrl: url }));
+      if (res.statusCode !== 200) {
+        res.resume();
+        reject(new Error(`HTTP ${res.statusCode} from ${url}`));
+        return;
+      }
+      const chunks = [];
+      res.on('data', c => chunks.push(c));
+      res.on('end', () => {
+        try {
+          resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+        } catch (e) {
+          reject(new Error('JSON parse error: ' + e.message));
+        }
+      });
+      res.on('error', reject);
     });
     req.on('error', reject);
-    req.setTimeout(timeout, () => { req.destroy(); reject(new Error('Timeout')); });
+    req.setTimeout(timeout, () => {
+      req.destroy();
+      reject(new Error(`Timeout fetching ${url}`));
+    });
   });
-}
-
-function fetchUrl(url, timeout = 12000) {
-  return fetchUrlWithFinalUrl(url, timeout).then(r => r.html);
 }
