@@ -53,8 +53,6 @@ exports.handler = async (event) => {
         });
       }
     }
-
-    // Fallback: chercher les titres dans un autre format
     if (products.length === 0) {
       const altPattern = /class="[^"]*field-content[^"]*"[^>]*>[\s\S]*?<a[^>]+>([\s\S]*?)<\/a>/g;
       while ((m = altPattern.exec(html)) !== null && products.length < 8) {
@@ -74,13 +72,44 @@ exports.handler = async (event) => {
     const subShort = substance.substring(0, Math.min(5, substance.length));
     const referralSlug = substance.replace(/\s+/g, '-');
 
-    // Stratégie A : referral formel avec slug exact (ex: ibuprofen, valproate)
+    // Helper : extraire toute URL de referral/signal de la page (HTTP ou JS redirect)
+    function extractPracUrlFromHtml(pageHtml) {
+      // Canonical URL
+      const canonical = pageHtml.match(/<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/i)
+        || pageHtml.match(/<link[^>]+href=["']([^"']+)["'][^>]+rel=["']canonical["']/i);
+      if (canonical && (canonical[1].includes('/referrals/') || canonical[1].includes('/signals/'))) {
+        return canonical[1].startsWith('http') ? canonical[1] : 'https://www.ema.europa.eu' + canonical[1];
+      }
+      // og:url
+      const ogUrl = pageHtml.match(/<meta[^>]+property=["']og:url["'][^>]+content=["']([^"']+)["']/i)
+        || pageHtml.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:url["']/i);
+      if (ogUrl && (ogUrl[1].includes('/referrals/') || ogUrl[1].includes('/signals/'))) {
+        return ogUrl[1].startsWith('http') ? ogUrl[1] : 'https://www.ema.europa.eu' + ogUrl[1];
+      }
+      // Meta refresh
+      const metaRefresh = pageHtml.match(/<meta[^>]+http-equiv=["'refresh["'][^>]+content=["'][^"']*url=([^"']+)["']/i)
+      if (metaRefresh && (metaRefresh[1].includes('/referrals/') || metaRefresh[1].includes('/signals/'))) {
+        return metaRefresh[1].startsWith('http') ? metaRefresh[1] : 'https://www.ema.europa.eu' + metaRefresh[1];
+      }
+      // JS window.location redirect
+      const jsRedirect = pageHtml.match(/window\.location(?:\.href)?\s*=\s*["']([^"']+(?:referrals|signals)[^"']+)["']/i)
+      if (jsRedirect) {
+        return jsRedirect[1].startsWith('http') ? jsRedirect[1] : 'https://www.ema.europa.eu' + jsRedirect[1];
+      }
+      // Lien direct vers referral/signal dans la page
+      const directLink = pageHtml.match(/href=["']((?:https:\/\/www\.ema\.europa\.eu)?\/en\/medicines\/human\/(?:referrals|signals)\/[^"']+)["']/i);
+      if (directLink) {
+        return directLink[1].startsWith('http') ? directLink[1] : 'https://www.ema.europa.eu' + directLink[1];
+      }
+      return null;
+    }
+
+    // Stratégie A : referral formel avec slug exact
     if (!pracActive) {
       try {
         const url = `https://www.ema.europa.eu/en/medicines/human/referrals/${encodeURIComponent(referralSlug)}`;
         const { html: pracHtml, finalUrl } = await fetchUrlWithFinalUrl(url);
-        if (!pracHtml.includes('Page not found') && !pracHtml.includes('404') &&
-            pracHtml.toLowerCase().includes(subShort)) {
+        if (!pracHtml.toLowerCase().includes('not found') && pracHtml.toLowerCase().includes(subShort)) {
           pracActive = true;
           const titleMatch = pracHtml.match(/<h1[^>]*>([\s\S]*?)<\/h1>/);
           if (titleMatch) pracDetails = titleMatch[1].replace(/<[^>]+>/g, '').trim();
@@ -89,13 +118,12 @@ exports.handler = async (event) => {
       } catch (_) {}
     }
 
-    // Stratégie B : signal avec slug exact (ex: isotretinoin)
+    // Stratégie B : signal avec slug exact
     if (!pracActive) {
       try {
         const url = `https://www.ema.europa.eu/en/medicines/human/signals/${encodeURIComponent(referralSlug)}`;
         const { html: sigHtml, finalUrl } = await fetchUrlWithFinalUrl(url);
-        if (!sigHtml.includes('Page not found') && !sigHtml.includes('404') &&
-            sigHtml.toLowerCase().includes(subShort)) {
+        if (!sigHtml.toLowerCase().includes('not found') && sigHtml.toLowerCase().includes(subShort)) {
           pracActive = true;
           const titleMatch = sigHtml.match(/<h1[^>]*>([\s\S]*?)<\/h1>/);
           if (titleMatch) pracDetails = titleMatch[1].replace(/<[^>]+>/g, '').trim();
@@ -104,66 +132,75 @@ exports.handler = async (event) => {
       } catch (_) {}
     }
 
-    // Stratégie C : recherche EMA referrals par substance (suit les redirections)
-    // Fonctionne même pour les slugs composés (ex: finasteride-dutasteride-containing-medicinal-products)
+    // Stratégie C : recherche EMA referrals (gère HTTP et JS redirects, slugs composés)
     if (!pracActive) {
       try {
         const searchReferralUrl = `https://www.ema.europa.eu/en/medicines/human/referrals?search_api_fulltext=${encodeURIComponent(substance)}`;
         const { html: refHtml, finalUrl } = await fetchUrlWithFinalUrl(searchReferralUrl);
-        // Si la recherche a redirigé vers une page de referral spécifique
-        const isRedirectedToReferral = finalUrl && finalUrl.includes('/referrals/') && !finalUrl.endsWith('/referrals');
-        const isValidPage = !refHtml.includes('Page not found') && refHtml.toLowerCase().includes(subShort);
-        if (isValidPage && (isRedirectedToReferral || refHtml.toLowerCase().includes('prac') || refHtml.toLowerCase().includes('referral'))) {
-          pracActive = true;
-          const titleMatch = refHtml.match(/<h1[^>]*>([\s\S]*?)<\/h1>/);
-          if (titleMatch) pracDetails = titleMatch[1].replace(/<[^>]+>/g, '').trim();
-          // Utiliser la vraie URL du referral (après redirection)
-          if (isRedirectedToReferral) {
-            pracUrl = finalUrl;
-          } else {
-            // Chercher un lien vers un referral dans la page
-            const linkRegex = new RegExp(`href="(/en/medicines/human/referrals/[^"]+)"`, 'i');
-            const linkMatch = refHtml.match(linkRegex);
-            if (linkMatch) pracUrl = 'https://www.ema.europa.eu' + linkMatch[1];
+        // Vérifier si on a bien du contenu pertinent
+        const hasSubstance = refHtml.toLowerCase().includes(subShort);
+        const notFound = refHtml.toLowerCase().includes('not found');
+        if (!notFound && hasSubstance) {
+          // Extraire l'URL du referral depuis le HTML (HTTP redirect, JS redirect, canonical, lien direct...)
+          const foundUrl = extractPracUrlFromHtml(refHtml);
+          // Ou vérifier si finalUrl est déjà une page referral
+          const isRedirectedPage = finalUrl && finalUrl.includes('/referrals/') && !finalUrl.endsWith('/referrals');
+          if (foundUrl || isRedirectedPage) {
+            pracActive = true;
+            pracUrl = foundUrl || finalUrl;
+            const titleMatch = refHtml.match(/<h1[^>]*>([\s\S]*?)<\/h1>/);
+            if (titleMatch) pracDetails = titleMatch[1].replace(/<[^>]+>/g, '').trim();
+            // Si le titre est vide (page de résultats, pas la page referral), fetcher la page referral
+            if ((!pracDetails || pracDetails.length < 5) && pracUrl) {
+              try {
+                const refPage = await fetchUrl(pracUrl);
+                const t = refPage.match(/<h1[^>]*>([\s\S]*?)<\/h1>/);
+                if (t) pracDetails = t[1].replace(/<[^>]+>/g, '').trim();
+              } catch (_) {}
+            }
           }
         }
       } catch (_) {}
     }
 
-    // Stratégie D : recherche EMA signals par substance (suit les redirections)
+    // Stratégie D : recherche EMA signals (gère HTTP et JS redirects)
     if (!pracActive) {
       try {
         const searchSignalUrl = `https://www.ema.europa.eu/en/medicines/human/signals?search_api_fulltext=${encodeURIComponent(substance)}`;
         const { html: sigHtml, finalUrl } = await fetchUrlWithFinalUrl(searchSignalUrl);
-        const isRedirectedToSignal = finalUrl && finalUrl.includes('/signals/') && !finalUrl.endsWith('/signals');
-        const isValidPage = !sigHtml.includes('Page not found') && sigHtml.toLowerCase().includes(subShort);
-        if (isValidPage && (isRedirectedToSignal || sigHtml.toLowerCase().includes('prac') || sigHtml.toLowerCase().includes('signal'))) {
-          pracActive = true;
-          const titleMatch = sigHtml.match(/<h1[^>]*>([\s\S]*?)<\/h1>/);
-          if (titleMatch) pracDetails = titleMatch[1].replace(/<[^>]+>/g, '').trim();
-          if (isRedirectedToSignal) {
-            pracUrl = finalUrl;
-          } else {
-            const linkRegex = new RegExp(`href="(/en/medicines/human/signals/[^"]+)"`, 'i');
-            const linkMatch = sigHtml.match(linkRegex);
-            if (linkMatch) pracUrl = 'https://www.ema.europa.eu' + linkMatch[1];
+        const hasSubstance = sigHtml.toLowerCase().includes(subShort);
+        const notFound = sigHtml.toLowerCase().includes('not found');
+        if (!notFound && hasSubstance) {
+          const foundUrl = extractPracUrlFromHtml(sigHtml);
+          const isRedirectedPage = finalUrl && finalUrl.includes('/signals/') && !finalUrl.endsWith('/signals');
+          if (foundUrl || isRedirectedPage) {
+            pracActive = true;
+            pracUrl = foundUrl || finalUrl;
+            const titleMatch = sigHtml.match(/<h1[^>]*>([\s\S]*?)<\/h1>/);
+            if (titleMatch) pracDetails = titleMatch[1].replace(/<[^>]+>/g, '').trim();
+            if ((!pracDetails || pracDetails.length < 5) && pracUrl) {
+              try {
+                const sigPage = await fetchUrl(pracUrl);
+                const t = sigPage.match(/<h1[^>]*>([\s\S]*?)<\/h1>/);
+                if (t) pracDetails = t[1].replace(/<[^>]+>/g, '').trim();
+              } catch (_) {}
+            }
           }
         }
       } catch (_) {}
     }
 
-    // Stratégie E : recherche full-text EMA (substance + PRAC/referral)
+    // Stratégie E : recherche full-text EMA (fallback général)
     if (!pracActive) {
       try {
         const ftsUrl = `https://www.ema.europa.eu/en/search?search_api_fulltext=${encodeURIComponent(substance + ' referral')}`;
         const ftsHtml = await fetchUrl(ftsUrl);
-        const hasPRAC = /prac|signal|referral|pharmacovigilance/i.test(ftsHtml);
         const hasSubstance = new RegExp(subShort, 'i').test(ftsHtml);
-        if (hasPRAC && hasSubstance) {
-          const signalLinkMatch = ftsHtml.match(/href="(\/en\/medicines\/human\/(?:signals|referrals)\/[^"]+)"/i);
-          if (signalLinkMatch) {
+        if (hasSubstance) {
+          const foundUrl = extractPracUrlFromHtml(ftsHtml);
+          if (foundUrl) {
             pracActive = true;
-            pracUrl = 'https://www.ema.europa.eu' + signalLinkMatch[1];
+            pracUrl = foundUrl;
             try {
               const sigPageHtml = await fetchUrl(pracUrl);
               const titleMatch = sigPageHtml.match(/<h1[^>]*>([\s\S]*?)<\/h1>/);
@@ -198,7 +235,6 @@ exports.handler = async (event) => {
   }
 };
 
-// Fetch avec suivi de l'URL finale après redirections
 function fetchUrlWithFinalUrl(url, timeout = 12000) {
   return new Promise((resolve, reject) => {
     const req = https.get(url, {
@@ -224,7 +260,6 @@ function fetchUrlWithFinalUrl(url, timeout = 12000) {
   });
 }
 
-// Fetch simple (rétrocompatible)
 function fetchUrl(url, timeout = 12000) {
   return fetchUrlWithFinalUrl(url, timeout).then(r => r.html);
 }
