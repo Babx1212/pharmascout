@@ -579,7 +579,7 @@
             Interrogation de l'EMA…
           </div>
           <div id="ema-error" style="display:none" class="flag-item flag-warning">
-             ⚠️ <span id="ema-error-text"></span>
+            ⚠️ <span id="ema-error-text"></span>
           </div>
           <div id="ema-content" style="display:none">
             <div class="row g-3 mb-4">
@@ -606,15 +606,18 @@
               </div>
             </div>
             <div id="ema-prac-alert" style="display:none" class="flag-item flag-danger mb-3">
-              🔴 <div><div class="flag-label">Procédure PRAC active détectée</div>
-              <div class="flag-detail">L'EMA a initié ou est en cours d'une procédure de rébérencement pour cette substance. Risque réglementaire élevé.</div></div>
+              🔴 <div>
+                <div class="flag-label" id="ema-prac-alert-title">Procédure PRAC active détectée</div>
+                <div class="flag-detail" id="ema-prac-alert-detail">L'EMA a initié ou est en cours d'une procédure de pharmacovigilance pour cette substance. Risque réglementaire élevé.</div>
+                <div id="ema-prac-alert-link" style="margin-top:4px;display:none"><a id="ema-prac-link" href="#" target="_blank" style="color:#ef4444;font-size:0.8rem">→ Voir sur ema.europa.eu</a></div>
+              </div>
             </div>
             <div id="ema-products-section" style="display:none">
-              <h6 style="font-size:0.9rem;font-weight:600;color:var(--primary);margin-bottom:10px">Produits identifieés (EMA)</h6>
+              <h6 style="font-size:0.9rem;font-weight:600;color:var(--primary);margin-bottom:10px">Produits identifiés (EMA)</h6>
               <div id="ema-products-list"></div>
             </div>
             <div class="mt-3 p-3" style="background:#f8fafc;border-radius:10px;font-size:0.82rem;color:var(--text-muted)">
-              <a id="ema-search-link" href="#" target="_blank" style="color:var(--accent)">Voir les résultats complets sur ema.europa.eu</a>
+              🔗 <a id="ema-search-link" href="#" target="_blank" style="color:var(--accent)">Voir les résultats complets sur ema.europa.eu</a>
               &nbsp;·&nbsp;
               <a href="https://www.adrreports.eu" target="_blank" style="color:var(--accent)">EudraVigilance (ADRs Europe)</a>
             </div>
@@ -669,7 +672,7 @@
               </table>
             </div>
             <div class="mt-3 p-3" style="background:#f8fafc;border-radius:10px;font-size:0.82rem;color:var(--text-muted)">
-              <a id="swiss-search-link" href="#" target="_blank" style="color:var(--accent)">Rechercher sur swissmedic.ch</a>
+              🔗 <a id="swiss-search-link" href="#" target="_blank" style="color:var(--accent)">Rechercher sur swissmedic.ch</a>
               &nbsp;·&nbsp;
               <a href="https://www.swissmedic.ch/swissmedic/en/home/humanarzneimittel/market-surveillance/pharmacovigilance/vigilance-news.html" target="_blank" style="color:var(--accent)">Vigilance News Swissmedic</a>
               &nbsp;·&nbsp;
@@ -704,7 +707,7 @@
               </div>
               <div class="col-6">
                 <div class="metric-box">
-                  <div></div>v class="metric-value" id="m-mkt-growth">—</div>
+                  <div class="metric-value" id="m-mkt-growth">—</div>
                   <div class="metric-label">Croissance marché (moy.)</div>
                   <div class="metric-sub">source IQVIA</div>
                 </div>
@@ -1541,6 +1544,20 @@ function renderEMA(d) {
     document.getElementById('m-ema-prac').textContent = '🔴 Actif';
     document.getElementById('m-ema-prac').style.color = '#ef4444';
     show('ema-prac-alert');
+    // Titre du signal/referral si disponible
+    if (d.pracDetails) {
+      document.getElementById('ema-prac-alert-title').textContent = d.pracDetails;
+    } else {
+      document.getElementById('ema-prac-alert-title').textContent = 'Procédure PRAC / signal de sécurité détecté';
+    }
+    // Lien direct vers la page EMA
+    if (d.pracUrl) {
+      const linkEl = document.getElementById('ema-prac-link');
+      linkEl.href = d.pracUrl;
+      show('ema-prac-alert-link');
+    } else {
+      hide('ema-prac-alert-link');
+    }
   } else {
     document.getElementById('m-ema-prac').textContent = '✅ Aucun';
     document.getElementById('m-ema-prac').style.color = '#10b981';
