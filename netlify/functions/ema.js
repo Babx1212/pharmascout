@@ -90,29 +90,29 @@ exports.handler = async (event) => {
 
     // --- 5. Construire la rÃ©ponse ---
     
-    // Produits EMA via recherche ciblée (court timeout pour ne pas bloquer PRAC)
+    // --- Produits EMA via EPAR JSON officiel (best-effort, 5s timeout) ---
     var emaProducts = [];
     try {
-      var emaSearchHtml = await fetchUrl(
-        'https://www.ema.europa.eu/en/medicines/field_ema_web_categories%253Aname_field/Human/ema_group_types/ema_medicine/search?search_api_fulltext=' + encodeURIComponent(substance),
-        5000
-      );
-      if (emaSearchHtml && emaSearchHtml.statusCode === 200) {
-        var html = emaSearchHtml.body;
-        // Extract EPAR product links: /medicines/human/EPAR/product-name
-        var eparRe = /href="[^"]*\/medicines\/human\/EPAR\/([^"\/]+)"/gi;
-        var seen = {};
-        var m;
-        while ((m = eparRe.exec(html)) !== null && emaProducts.length < 30) {
-          var slug = m[1].replace(/-/g, ' ');
-          var key = slug.toLowerCase();
-          if (!seen[key]) {
-            seen[key] = true;
-            emaProducts.push({ name: slug.charAt(0).toUpperCase() + slug.slice(1), holder: '—', status: 'Autorisé' });
-          }
-        }
+      var eparResult = await Promise.race([
+        fetchJson('https://www.ema.europa.eu/en/documents/report/medicines-output-epar-report_en.json', 20000),
+        new Promise(function(res) { setTimeout(function() { res(null); }, 5000); })
+      ]);
+      if (eparResult) {
+        var eparArr = Array.isArray(eparResult) ? eparResult :
+          Array.isArray(eparResult.data) ? eparResult.data :
+          (function() { var k = Object.keys(eparResult||{}); for(var i=0;i<k.length;i++) { if(Array.isArray(eparResult[k[i]])) return eparResult[k[i]]; } return []; })();
+        emaProducts = eparArr.filter(function(r) {
+          var fields = [r.ActiveSubstance, r['Active substance'], r.active_substance, r.INN];
+          return fields.some(function(f) { return f && String(f).toLowerCase().indexOf(substance) !== -1; });
+        }).slice(0, 30).map(function(r) {
+          return {
+            name:   r.MedicinalProductName   || r['Medicinal product'] || r.name || '—',
+            holder: r.MarketingAuthorisationHolder || r['Marketing authorisation holder'] || r.mah || '—',
+            status: r.AuthorisationStatus    || r['Authorisation status'] || '—'
+          };
+        });
       }
-    } catch(emaErr) { /* timeout or error: keep empty products */ }
+    } catch(eparErr) { /* EPAR timeout or error - keep empty, PRAC still works */ }
 
 return {
       statusCode: 200,
@@ -210,35 +210,5 @@ function fetchJson(url, timeout = 20000) {
       req.destroy();
       reject(new Error(`Timeout fetching ${url}`));
     });
-  });
-}
-
-/**
- * Télécharge une URL et retourne le texte brut (HTML).
- */
-function fetchUrl(url, timeoutMs) {
-  timeoutMs = timeoutMs || 10000;
-  return new Promise(function(resolve, reject) {
-    var u;
-    try { u = new URL(url); } catch(e) { return reject(e); }
-    var chunks = [];
-    var req = https.request({
-      hostname: u.hostname,
-      path:     u.pathname + u.search,
-      method:   'GET',
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; PharmaScout/1.0)', 'Accept': 'text/html,*/*' }
-    }, function(res) {
-      if (res.statusCode === 301 || res.statusCode === 302) {
-        var loc = res.headers && res.headers.location;
-        if (loc) return resolve(fetchUrl(loc, timeoutMs));
-      }
-      res.on('data', function(c) { chunks.push(c); });
-      res.on('end', function() {
-        resolve({ statusCode: res.statusCode, body: Buffer.concat(chunks).toString('utf8') });
-      });
-    });
-    req.setTimeout(timeoutMs, function() { req.destroy(); reject(new Error('fetchUrl timeout')); });
-    req.on('error', reject);
-    req.end();
   });
 }
