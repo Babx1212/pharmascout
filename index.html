@@ -649,6 +649,13 @@
               <a href="https://www.adrreports.eu" target="_blank" style="color:var(--accent)">EudraVigilance (ADRs EU)</a>
             </div>
           </div>
+          <div id="ema-products-section" style="display:none">
+              <h6 style="font-size:0.9rem;font-weight:600;color:var(--primary);margin-bottom:10px">Produits autorisés (EMA — Union Européenne)</h6>
+              <table class="data-table">
+                <thead><tr><th>Médicament</th><th>Titulaire AMM</th><th>Statut</th></tr></thead>
+                <tbody id="ema-products-body"></tbody>
+              </table>
+            </div>
           <div id="ema-pending" style="text-align:center;padding:30px;color:var(--text-muted)">
             Lance une analyse pour voir les données EMA.
           </div>
@@ -1679,6 +1686,13 @@ function renderEMA(d) {
     d.searchUrl || `https://www.ema.europa.eu/en/search?search_api_fulltext=${encodeURIComponent(d.substance)}`;
 
   // ── Injecter signal EMA dans l'onglet Sécurité ──
+    // Produits EMA
+  if (d.products && d.products.length > 0) {
+    show('ema-products-section');
+    document.getElementById('ema-products-body').innerHTML = d.products.map(p =>
+      `<tr><td>${p.name||'—'}</td><td style="color:var(--text-muted)">${p.holder||'—'}</td><td style="color:var(--text-muted)">${p.status||'—'}</td></tr>`
+    ).join('');
+  }
   injectEmaFlagsIntoSafety(d);
 }
 
