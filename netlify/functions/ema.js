@@ -90,42 +90,38 @@ exports.handler = async (event) => {
 
     // --- 5. Construire la rÃ©ponse ---
     
-    // --- Produits EMA via JSON officiel EMA (best-effort, 8s timeout) ---
-    var emaProducts = [];
-    var EMA_MEDICINES_URLS = [
+    // DEBUG: test EMA medicines URLs
+    var urlTests = {};
+    var emaUrls = [
       'https://www.ema.europa.eu/en/documents/report/medicines-output-medicines_json-report_en.json',
-      'https://www.ema.europa.eu/en/documents/report/medicines-output-epar-report_en.json',
-      'https://www.ema.europa.eu/en/documents/report/medicines-output-json-report_en.json'
+      'https://www.ema.europa.eu/en/documents/report/medicines-output-json-report_en.json',
+      'https://www.ema.europa.eu/en/documents/report/medicines-output-epar-report_en.json'
     ];
+    for (var ui2 = 0; ui2 < emaUrls.length; ui2++) {
+      try {
+        var uRes = await Promise.race([
+          fetchJson(emaUrls[ui2], 6000),
+          new Promise(function(r) { setTimeout(function() { r('TIMEOUT'); }, 4000); })
+        ]);
+        if (uRes === 'TIMEOUT') {
+          urlTests[emaUrls[ui2].split('/').pop()] = 'TIMEOUT > 4s';
+        } else if (uRes) {
+          var arr2 = Array.isArray(uRes) ? uRes : (uRes.data || Object.values(uRes).find(Array.isArray) || []);
+          urlTests[emaUrls[ui2].split('/').pop()] = 'OK, ' + arr2.length + ' entries, keys:' + (arr2[0] ? Object.keys(arr2[0]).slice(0,4).join(',') : 'none');
+          break; // found working URL
+        }
+      } catch(ue) { urlTests[emaUrls[ui2].split('/').pop()] = 'ERR: ' + ue.message; }
+    }
+    // Also test the Drupal JSON format endpoint
     try {
-      var eparResult = await Promise.race([
-        (async function() {
-          for (var ui = 0; ui < EMA_MEDICINES_URLS.length; ui++) {
-            try {
-              var d = await fetchJson(EMA_MEDICINES_URLS[ui], 18000);
-              if (d) return d;
-            } catch(e) {}
-          }
-          return null;
-        })(),
-        new Promise(function(res) { setTimeout(function() { res(null); }, 8000); })
+      var drupalRes = await Promise.race([
+        fetchJson('https://www.ema.europa.eu/en/medicines/field_ema_web_categories%253Aname_field/Human/ema_group_types/ema_medicine/search?search_api_fulltext=' + encodeURIComponent(substance) + '&_format=json', 4000),
+        new Promise(function(r) { setTimeout(function() { r('TIMEOUT'); }, 3000); })
       ]);
-      if (eparResult) {
-        var eparArr = Array.isArray(eparResult) ? eparResult :
-          Array.isArray(eparResult.data) ? eparResult.data :
-          (function() { var k = Object.keys(eparResult||{}); for(var i=0;i<k.length;i++) { if(Array.isArray(eparResult[k[i]])) return eparResult[k[i]]; } return []; })();
-        emaProducts = eparArr.filter(function(r) {
-          var fields = [r.ActiveSubstance, r['Active substance'], r.active_substance, r.INN, r.inn];
-          return fields.some(function(f) { return f && String(f).toLowerCase().indexOf(substance) !== -1; });
-        }).slice(0, 30).map(function(r) {
-          return {
-            name:   r.MedicinalProductName   || r['Medicinal product'] || r['medicine_name'] || r.name || '—',
-            holder: r.MarketingAuthorisationHolder || r['Marketing authorisation holder'] || r.mah_name || r.mah || '—',
-            status: r.AuthorisationStatus    || r['Authorisation status'] || r.status || '—'
-          };
-        });
-      }
-    } catch(eparErr) { /* keep empty */ }
+      urlTests['drupal_format_json'] = drupalRes === 'TIMEOUT' ? 'TIMEOUT' : (typeof drupalRes === 'object' ? 'OK type=' + typeof drupalRes + ' keys=' + Object.keys(drupalRes||{}).slice(0,5).join(',') : String(drupalRes).substring(0,50));
+    } catch(de) { urlTests['drupal_format_json'] = 'ERR: ' + de.message; }
+    
+    var emaProducts = [];
 
 return {
       statusCode: 200,
@@ -169,7 +165,7 @@ return {
 
         // Lien de recherche EMA
         searchUrl: `https://www.ema.europa.eu/en/search?search_api_fulltext=${encodeURIComponent(substance)}`,
-        cacheAge: Math.round((now - _cache.ts) / 1000 / 60) // minutes
+        cacheAge: Math.round((now - _cache.ts) / 1000 / 60), urlTests: urlTests
       })
     };
 
