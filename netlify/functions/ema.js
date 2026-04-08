@@ -90,38 +90,34 @@ exports.handler = async (event) => {
 
     // --- 5. Construire la rÃ©ponse ---
     
-    // DEBUG: test EMA medicines URLs
-    var urlTests = {};
-    var emaUrls = [
-      'https://www.ema.europa.eu/en/documents/report/medicines-output-medicines_json-report_en.json',
-      'https://www.ema.europa.eu/en/documents/report/medicines-output-json-report_en.json',
-      'https://www.ema.europa.eu/en/documents/report/medicines-output-epar-report_en.json'
-    ];
-    for (var ui2 = 0; ui2 < emaUrls.length; ui2++) {
-      try {
-        var uRes = await Promise.race([
-          fetchJson(emaUrls[ui2], 6000),
-          new Promise(function(r) { setTimeout(function() { r('TIMEOUT'); }, 4000); })
-        ]);
-        if (uRes === 'TIMEOUT') {
-          urlTests[emaUrls[ui2].split('/').pop()] = 'TIMEOUT > 4s';
-        } else if (uRes) {
-          var arr2 = Array.isArray(uRes) ? uRes : (uRes.data || Object.values(uRes).find(Array.isArray) || []);
-          urlTests[emaUrls[ui2].split('/').pop()] = 'OK, ' + arr2.length + ' entries, keys:' + (arr2[0] ? Object.keys(arr2[0]).slice(0,4).join(',') : 'none');
-          break; // found working URL
-        }
-      } catch(ue) { urlTests[emaUrls[ui2].split('/').pop()] = 'ERR: ' + ue.message; }
-    }
-    // Also test the Drupal JSON format endpoint
-    try {
-      var drupalRes = await Promise.race([
-        fetchJson('https://www.ema.europa.eu/en/medicines/field_ema_web_categories%253Aname_field/Human/ema_group_types/ema_medicine/search?search_api_fulltext=' + encodeURIComponent(substance) + '&_format=json', 4000),
-        new Promise(function(r) { setTimeout(function() { r('TIMEOUT'); }, 3000); })
-      ]);
-      urlTests['drupal_format_json'] = drupalRes === 'TIMEOUT' ? 'TIMEOUT' : (typeof drupalRes === 'object' ? 'OK type=' + typeof drupalRes + ' keys=' + Object.keys(drupalRes||{}).slice(0,5).join(',') : String(drupalRes).substring(0,50));
-    } catch(de) { urlTests['drupal_format_json'] = 'ERR: ' + de.message; }
-    
     var emaProducts = [];
+    var emaDebug = {};
+    try {
+      var medData = await Promise.race([
+        fetchJson('https://www.ema.europa.eu/en/documents/report/medicines-output-medicines_json-report_en.json', 18000),
+        new Promise(function(r) { setTimeout(function() { r(null); }, 8000); })
+      ]);
+      if (medData) {
+        var arr = Array.isArray(medData) ? medData : (medData.data || []);
+        emaDebug.totalEntries = arr.length;
+        emaDebug.allKeys = arr[0] ? Object.keys(arr[0]) : [];
+        // Search for substance in ALL string fields
+        var matches = arr.filter(function(r) {
+          return Object.values(r).some(function(v) {
+            return v && String(v).toLowerCase().indexOf(substance) !== -1;
+          });
+        });
+        emaDebug.matchCount = matches.length;
+        emaDebug.first2 = matches.slice(0,2);
+        emaProducts = matches.slice(0,30).map(function(r) {
+          return {
+            name: r.name_of_medicine || r.medicine_name || r.name || '—',
+            holder: r.marketing_authorisation_holder || r.mah || r.holder || '—',
+            status: r.medicine_status || r.status || '—'
+          };
+        });
+      }
+    } catch(e) { emaDebug.err = e.message; }
 
 return {
       statusCode: 200,
@@ -165,7 +161,7 @@ return {
 
         // Lien de recherche EMA
         searchUrl: `https://www.ema.europa.eu/en/search?search_api_fulltext=${encodeURIComponent(substance)}`,
-        cacheAge: Math.round((now - _cache.ts) / 1000 / 60), urlTests: urlTests
+        cacheAge: Math.round((now - _cache.ts) / 1000 / 60), emaDebug: emaDebug
       })
     };
 
