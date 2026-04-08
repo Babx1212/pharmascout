@@ -473,27 +473,13 @@
         <!-- Safety tab -->
         <div class="tab-pane fade show active" id="tab-safety">
           <div class="row g-3 mb-4">
-            <div class="col-4">
-              <div class="metric-box">
-                <div class="metric-value" id="m-total">—</div>
-                <div class="metric-label">Total rapports FAERS</div>
-              </div>
-            </div>
-            <div class="col-4">
-              <div class="metric-box">
-                <div class="metric-value" id="m-serious">—</div>
-                <div class="metric-label">Rapports sérieux</div>
-                <div class="metric-sub" id="m-serious-pct"></div>
-              </div>
-            </div>
-            <div class="col-4">
-              <div class="metric-box">
-                <div class="metric-value" id="m-deaths">—</div>
-                <div class="metric-label">Décès rapportés</div>
-                <div class="metric-sub" id="m-deaths-pct"></div>
-              </div>
-            </div>
-          </div>
+          <div class="col"><div class="metric-box"><div class="metric-value" id="m-total">—</div><div class="metric-label">FDA Reports</div></div></div>
+          <div class="col"><div class="metric-box"><div class="metric-value" id="m-deaths">—</div><div class="metric-label">Décès FDA</div></div></div>
+          <div class="col"><div class="metric-box"><div class="metric-value" id="m-pubmed-total">—</div><div class="metric-label">PubMed</div></div></div>
+          <div class="col"><div class="metric-box"><div class="metric-value" id="m-ema-prac-safety">—</div><div class="metric-label">PRAC EMA</div></div></div>
+          <div class="col"><div class="metric-box"><div class="metric-value" id="m-swiss-pv-safety">—</div><div class="metric-label">Swissmedic PV</div></div></div>
+          <div style="display:none"><span id="m-serious"></span><span id="m-serious-pct"></span><span id="m-deaths-pct"></span><span id="m-pubmed-safety"></span><span id="m-pubmed-recent"></span></div>
+        </div>
 
           <!-- Top reactions -->
           <div id="reactions-section" style="display:none">
@@ -534,6 +520,14 @@
               </div>
             </div>
           </div>
+        <div id="regulatory-overview" class="mt-4">
+          <h6 style="color:var(--text-muted);font-size:0.8rem;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">Aperçu réglementaire</h6>
+          <div class="row g-2">
+            <div class="col-4"><div id="reg-fda-block" class="p-3" style="background:#f8fafa;border-radius:10px;border:1px solid #e5e7eb"><div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:4px">🇺🇸 FDA</div><div id="reg-fda-status" style="font-weight:600;font-size:0.88rem">—</div><div id="reg-fda-detail" style="font-size:0.75rem;color:var(--text-muted)"></div></div></div>
+            <div class="col-4"><div id="reg-ema-block" class="p-3" style="background:#f8fafa;border-radius:10px;border:1px solid #e5e7eb"><div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:4px">🇪🇺 EMA</div><div id="reg-ema-status" style="font-weight:600;font-size:0.88rem">Chargement…</div><div id="reg-ema-detail" style="font-size:0.75rem;color:var(--text-muted)"></div></div></div>
+            <div class="col-4"><div id="reg-swiss-block" class="p-3" style="background:#f8fafa;border-radius:10px;border:1px solid #e5e7eb"><div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:4px">🇨🇭 Swissmedic</div><div id="reg-swiss-status" style="font-weight:600;font-size:0.88rem">Chargement…</div><div id="reg-swiss-detail" style="font-size:0.75rem;color:var(--text-muted)"></div></div></div>
+          </div>
+        </div>
         </div>
 
         <!-- Competition tab -->
@@ -1353,6 +1347,14 @@ function renderResults() {
   }
 
   // PubMed
+  if (document.getElementById('reg-fda-status')) {
+    const _fda = sf.score < 5
+      ? { text: '⚠️ Signaux détectés', color: '#ef4444', detail: fmt(faers.totalReports) + ' rapports FAERS' }
+      : { text: '✅ Profil acceptable', color: '#10b981', detail: fmt(faers.totalReports) + ' rapports FAERS' };
+    document.getElementById('reg-fda-status').textContent = _fda.text;
+    document.getElementById('reg-fda-status').style.color = _fda.color;
+    document.getElementById('reg-fda-detail').textContent = _fda.detail;
+  }
   document.getElementById('m-pubmed-total').textContent = fmt(pubmed.totalPublications);
   document.getElementById('m-pubmed-safety').textContent = fmt(pubmed.safetyPublications);
   document.getElementById('m-pubmed-recent').textContent = fmt(pubmed.recentSafetyPublications);
@@ -1742,6 +1744,28 @@ function injectEmaFlagsIntoSafety(d) {
   if (fragments.length > 0) {
     container.insertAdjacentHTML('afterbegin', fragments.join(''));
   }
+
+  const _rEs=document.getElementById('reg-ema-status');
+  const _rEd=document.getElementById('reg-ema-detail');
+  const _mEP=document.getElementById('m-ema-prac-safety');
+  if (_rEs) {
+    if (d.pracActive && d.isSafetyReferral) {
+      _rEs.textContent='🔴 Signal PRAC';_rEs.style.color='#ef4444';
+      _rEd.textContent=d.pracDetails?d.pracDetails.slice(0,60):'Referral sécurité actif';
+      if(_mEP){_mEP.textContent='🔴 Safety';_mEP.style.color='#ef4444';}
+    } else if (d.pracActive) {
+      _rEs.textContent='⚠️ Procédure EMA';_rEs.style.color='#f59e0b';
+      _rEd.textContent=d.pracDetails?d.pracDetails.slice(0,60):'';
+      if(_mEP){_mEP.textContent='⚠️ PRAC';_mEP.style.color='#f59e0b';}
+    } else if (d.hasDhpc) {
+      _rEs.textContent='⚠️ DHPC';_rEs.style.color='#f59e0b';
+      _rEd.textContent='Communication sécurité professionnels';
+      if(_mEP){_mEP.textContent='⚠️ DHPC';_mEP.style.color='#f59e0b';}
+    } else {
+      _rEs.textContent='✅ Aucun signal';_rEs.style.color='#10b981';_rEd.textContent='';
+      if(_mEP){_mEP.textContent='✅ Aucun';_mEP.style.color='#10b981';}
+    }
+  }
 }
 
 async function fetchSwissmedic(substance) {
@@ -1756,6 +1780,33 @@ async function fetchSwissmedic(substance) {
     show('swiss-error');
     document.getElementById('swiss-error-text').textContent =
       `Données Swissmedic indisponibles : ${e.message}. Consultez directement swissmedic.ch`;
+  }
+}
+
+function injectSwissFlagsIntoSafety(d) {
+  const _rSs=document.getElementById('reg-swiss-status');
+  const _rSd=document.getElementById('reg-swiss-detail');
+  const _mSP=document.getElementById('m-swiss-pv-safety');
+  if (_rSs) {
+    if (d.pvAlert) {
+      _rSs.textContent='⚠️ Vigilance News';_rSs.style.color='#f59e0b';
+      _rSd.textContent='Mentionné dans Vigilance News';
+      if(_mSP){_mSP.textContent='⚠️ Oui';_mSP.style.color='#f59e0b';}
+    } else if (d.totalCHProducts > 0) {
+      _rSs.textContent='✅ Autorisé CH';_rSs.style.color='#10b981';
+      _rSd.textContent=d.totalCHProducts+' produit(s) Swissmedic';
+      if(_mSP){_mSP.textContent='✅ Autorisé';_mSP.style.color='#10b981';}
+    } else {
+      _rSs.textContent='— Absent du marché CH';_rSs.style.color='var(--text-muted)';
+      _rSd.textContent='';
+      if(_mSP){_mSP.textContent='—';_mSP.style.color='var(--text-muted)';}
+    }
+  }
+  const _fc=document.getElementById('flags-container');
+  if (!_fc) return;
+  _fc.querySelectorAll('.swiss-flag-injected').forEach(el=>el.remove());
+  if (d.pvAlert) {
+    _fc.insertAdjacentHTML('afterbegin',`<div class="flag-item flag-warning swiss-flag-injected">🇨🇭 <div><div class="flag-label">Swissmedic Vigilance News : ${d.pvDetails?'<a href="'+d.pvDetails+'" target="_blank" style="color:inherit;text-decoration:underline">Voir la notice</a>':'Signal détecté'}</div><div class="flag-detail">Communication de pharmacovigilance Swissmedic</div></div></div>`);
   }
 }
 
@@ -1802,6 +1853,8 @@ function renderSwissmedic(d) {
   // Lien recherche
   const link = document.getElementById('swiss-search-link');
   link.href = `https://www.swissmedic.ch/swissmedic/en/home/humanarzneimittel/authorisations/authorised-human-medicinal-products/search.html?query=${encodeURIComponent(d.substance)}`;
+
+  injectSwissFlagsIntoSafety(d);
 }
 
 function show(id) { const el = document.getElementById(id); if(el) el.style.display = ''; }
