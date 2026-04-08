@@ -1,140 +1,223 @@
 /**
- * PharmaScout - Netlify Function : EMA Proxy (v5)
- * Uses official EMA JSON data files (updated 2x/day):
- *  - Referrals JSON : all PRAC referrals
- *  - DHPCs JSON     : direct healthcare professional communications
- *  - EPAR JSON      : all centrally authorised medicines
+ * PharmaScout â Netlify Function : EMA Proxy (v4)
+ * Utilise les JSON data files officiels de l'EMA (mis Ã  jour 2x/jour).
+ * - Referrals JSON : 709 KB, contient tous les referrals PRAC
+ * - DHPCs JSON    : communications directes professionnels de santÃ©
+ * Cache module-level (persist entre invocations warm Lambda).
  */
 
 const https = require('https');
 
 const EMA_REFERRALS_URL = 'https://www.ema.europa.eu/en/documents/report/referrals-output-json-report_en.json';
 const EMA_DHPC_URL      = 'https://www.ema.europa.eu/en/documents/report/dhpc-output-json-report_en.json';
-const EMA_EPAR_URL      = 'https://www.ema.europa.eu/en/documents/report/medicines-output-epar-report_en.json';
 
-// Module-level cache (warm Lambda instance)
-const CACHE_TTL = 30 * 60 * 1000; // 30 min
-var _cache = { referrals: null, dhpcs: null, epar: null, ts: 0 };
+// Cache module-level (warm Lambda instances)
+let _cache = { referrals: null, dhpcs: null, ts: 0 };
+const CACHE_TTL = 6 * 60 * 60 * 1000; // 6h
 
 const HEADERS = {
-  'Access-Control-Allow-Origin': '*',
   'Content-Type': 'application/json',
-  'Cache-Control': 'public, max-age=600'
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'Content-Type'
 };
 
-exports.handler = async function(event) {
+exports.handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') {
     return { statusCode: 200, headers: HEADERS, body: '' };
   }
 
-  var substance = ((event.queryStringParameters || {}).substance || '').trim().toLowerCase();
+  const substance = (event.queryStringParameters?.substance || '').trim().toLowerCase();
   if (!substance) {
-    return { statusCode: 400, headers: HEADERS, body: JSON.stringify({ error: 'substance parameter required' }) };
+    return { statusCode: 400, headers: HEADERS, body: JSON.stringify({ error: 'Missing substance parameter' }) };
   }
 
-  // Fetch / reuse cached EMA data
-  var now = Date.now();
-  if (!_cache.referrals || (now - _cache.ts) > CACHE_TTL) {
-    var results = await Promise.all([
-      fetchJson(EMA_REFERRALS_URL, 25000).catch(function() { return []; }),
-      fetchJson(EMA_DHPC_URL, 25000).catch(function() { return []; }),
-      fetchJson(EMA_EPAR_URL, 30000).catch(function() { return []; })
-    ]);
-    _cache.referrals = normalizeArray(results[0]);
-    _cache.dhpcs     = normalizeArray(results[1]);
-    _cache.epar      = normalizeArray(results[2]);
-    _cache.ts        = now;
-  }
+  try {
+    // --- 1. Charger / rafraÃ®chir le cache EMA ---
+    const now = Date.now();
+    if (!_cache.referrals || (now - _cache.ts) > CACHE_TTL) {
+      const [refData, dhpcData] = await Promise.all([
+        fetchJson(EMA_REFERRALS_URL, 25000),
+        fetchJson(EMA_DHPC_URL, 25000).catch(() => ({ data: [] }))
+      ]);
+      _cache.referrals = (refData && refData.data) ? refData.data : [];
+      _cache.dhpcs     = (dhpcData && dhpcData.data) ? dhpcData.data : [];
+      _cache.ts = now;
+    }
 
-  function matchesSubstance(text, subst) {
-    if (!text) return false;
-    var tl = String(text).toLowerCase();
-    return tl.indexOf(subst) !== -1 || (subst.length >= 6 && tl.indexOf(subst.slice(0, 6)) !== -1);
-  }
+    // --- 2. Construire les mots-clÃ©s de recherche ---
+    // DÃ©compose la substance en mots (ex: "finasteride" â ["finasteride"])
+    // TolÃ¨re les substances composÃ©es (ex: "finasteride dutasteride")
+    const substanceClean = substance.replace(/[^a-z0-9\s]/g, ' ').trim();
+    const keywords = [...new Set(
+      substanceClean.split(/\s+/).filter(w => w.length >= 4)
+    )];
+    if (keywords.length === 0) keywords.push(substanceClean);
 
-  function substanceInRecord(r, subst) {
-    var fields = [
-      r.ActiveSubstance, r['Active substance'], r.active_substance,
-      r.INN, r.MedicinalProductName, r.Substance, r.substance
-    ];
-    return fields.some(function(f) { return matchesSubstance(f, subst); });
-  }
+    function matchesSubstance(text) {
+      const t = (text || '').toLowerCase();
+      return keywords.some(k => t.includes(k));
+    }
 
-  // Referrals / PRAC matching
-  var matchingReferrals = (_cache.referrals || []).filter(function(r) {
-    return substanceInRecord(r, substance);
-  });
+    // --- 3. Recherche dans les Referrals ---
+    const matchingReferrals = _cache.referrals.filter(r => {
+      if (r.category !== 'Human') return false;
+      return matchesSubstance(r.international_non_proprietary_name_inn_common_name)
+          || matchesSubstance(r.referral_name);
+    });
 
-  var pracActive = matchingReferrals.some(function(r) {
-    var st = (r.ProcedureStatus || r.Status || r.status || '').toLowerCase();
-    return st === 'ongoing' || st === 'open';
-  });
-  var mainRef = matchingReferrals.find(function(r) {
-    var st = (r.ProcedureStatus || r.Status || r.status || '').toLowerCase();
-    return st === 'ongoing' || st === 'open';
-  }) || matchingReferrals[0];
-  var safetyRefs = matchingReferrals.filter(function(r) {
-    var reason = (r.ProcedureType || r.Reason || r.type || '').toLowerCase();
-    return reason.indexOf('safety') !== -1 || reason.indexOf('benefit') !== -1 || reason.indexOf('risk') !== -1;
-  });
+    // Trier : safety referrals en premier, puis par date de dÃ©cision (plus rÃ©cent)
+    matchingReferrals.sort((a, b) => {
+      if (a.safety_referral === 'Yes' && b.safety_referral !== 'Yes') return -1;
+      if (a.safety_referral !== 'Yes' && b.safety_referral === 'Yes') return 1;
+      return (b.european_commission_decision_date || '').localeCompare(a.european_commission_decision_date || '');
+    });
 
-  // DHPC matching
-  var matchingDhpcs = (_cache.dhpcs || []).filter(function(r) {
-    return substanceInRecord(r, substance);
-  });
+    const pracActive  = matchingReferrals.length > 0;
+    const mainRef     = matchingReferrals[0] || null;
+    const safetyRefs  = matchingReferrals.filter(r => r.safety_referral === 'Yes');
 
-  // EPAR product matching
-  var matchingEpar = (_cache.epar || []).filter(function(r) {
-    return substanceInRecord(r, substance);
-  });
-  var totalEUProducts = matchingEpar.length;
-  var products = matchingEpar.slice(0, 30).map(function(r) {
-    return {
-      name:   r.MedicinalProductName || r['Medicinal product'] || r.name || '—',
-      holder: r.MarketingAuthorisationHolder || r['Marketing authorisation holder'] || r.mah || '—',
-      status: r.AuthorisationStatus || r['Authorisation status'] || '—'
+    // --- 4. Recherche dans les DHPCs ---
+    const matchingDhpcs = _cache.dhpcs.filter(d => {
+      return matchesSubstance(d.active_substances)
+          || matchesSubstance(d.name_of_medicine);
+    }).map(d => ({
+      name:     d.name_of_medicine   || '',
+      url:      d.dhpc_url           || '',
+      date:     d.dissemination_date || '',
+      outcome:  d.regulatory_outcome || '',
+      type:     d.dhpc_type          || ''
+    }));
+
+    // --- 5. Construire la rÃ©ponse ---
+    
+    // Produits EMA via recherche ciblée (court timeout pour ne pas bloquer PRAC)
+    var emaProducts = [];
+    try {
+      var emaSearchHtml = await fetchUrl(
+        'https://www.ema.europa.eu/en/medicines/field_ema_web_categories%253Aname_field/Human/ema_group_types/ema_medicine/search?search_api_fulltext=' + encodeURIComponent(substance),
+        5000
+      );
+      if (emaSearchHtml && emaSearchHtml.statusCode === 200) {
+        var html = emaSearchHtml.body;
+        // Extract EPAR product links: /medicines/human/EPAR/product-name
+        var eparRe = /href="[^"]*\/medicines\/human\/EPAR\/([^"\/]+)"/gi;
+        var seen = {};
+        var m;
+        while ((m = eparRe.exec(html)) !== null && emaProducts.length < 30) {
+          var slug = m[1].replace(/-/g, ' ');
+          var key = slug.toLowerCase();
+          if (!seen[key]) {
+            seen[key] = true;
+            emaProducts.push({ name: slug.charAt(0).toUpperCase() + slug.slice(1), holder: '—', status: 'Autorisé' });
+          }
+        }
+      }
+    } catch(emaErr) { /* timeout or error: keep empty products */ }
+
+return {
+      statusCode: 200,
+      headers: HEADERS,
+      body: JSON.stringify({
+        substance,
+
+        // Produits centralement autorisÃ©s par l'EMA (molÃ©cules nationales = 0, c'est correct)
+        totalEUProducts: emaProducts.length,
+        products: emaProducts,
+
+        // Signal de sÃ©curitÃ© PRAC
+        pracActive,
+        pracDetails:        mainRef ? mainRef.referral_name                        : null,
+        pracUrl:            mainRef ? mainRef.referral_url                         : null,
+        pracStatus:         mainRef ? mainRef.current_status                       : null,
+        pracRecommendation: mainRef ? mainRef.prac_recommendation                  : null,
+        pracDecisionDate:   mainRef ? mainRef.european_commission_decision_date    : null,
+        pracType:           mainRef ? mainRef.referral_type                        : null,
+        isSafetyReferral:   mainRef ? (mainRef.safety_referral === 'Yes')          : false,
+
+        // Tous les referrals correspondants
+        allReferrals: matchingReferrals.map(r => ({
+          name:            r.referral_name,
+          url:             r.referral_url,
+          inn:             r.international_non_proprietary_name_inn_common_name,
+          status:          r.current_status,
+          type:            r.referral_type,
+          isSafety:        r.safety_referral === 'Yes',
+          recommendation:  r.prac_recommendation,
+          startDate:       r.procedure_start_date,
+          decisionDate:    r.european_commission_decision_date
+        })),
+
+        // DHPCs (communications sÃ©curitÃ©)
+        dhpcs: matchingDhpcs,
+        hasDhpc: matchingDhpcs.length > 0,
+
+        referralMentions: matchingReferrals.length,
+        safetyReferralCount: safetyRefs.length,
+
+        // Lien de recherche EMA
+        searchUrl: `https://www.ema.europa.eu/en/search?search_api_fulltext=${encodeURIComponent(substance)}`,
+        cacheAge: Math.round((now - _cache.ts) / 1000 / 60) // minutes
+      })
     };
-  });
 
-  return {
-    statusCode: 200,
-    headers: HEADERS,
-    body: JSON.stringify({
-      substance: substance,
-      totalEUProducts: totalEUProducts,
-      products: products,
-      pracActive: pracActive,
-      pracDetails: mainRef ? (mainRef.ReferralTitle || mainRef.Title || mainRef.title || mainRef.ProcedureTitle || '') : null,
-      isSafetyReferral: safetyRefs.length > 0,
-      allReferrals: matchingReferrals.slice(0, 10).map(function(r) {
-        return {
-          title:  r.ReferralTitle || r.Title || r.title || '',
-          status: r.ProcedureStatus || r.Status || r.status || '',
-          type:   r.ProcedureType  || r.Type  || r.type  || '',
-          url:    r.URL || r.url || ''
-        };
-      }),
-      hasDhpc: matchingDhpcs.length > 0,
-      dhpcDetails: matchingDhpcs[0] ? (matchingDhpcs[0].Title || matchingDhpcs[0].title || '') : null,
-      searchUrl: 'https://www.ema.europa.eu/en/medicines/field_ema_web_categories%253Aname_field/Human/ema_group_types/ema_medicine/search?search_api_fulltext=' + encodeURIComponent(substance)
-    })
-  };
+  } catch (e) {
+    return {
+      statusCode: 500,
+      headers: HEADERS,
+      body: JSON.stringify({ error: e.message, substance })
+    };
+  }
 };
 
-function normalizeArray(data) {
-  if (Array.isArray(data)) return data;
-  if (data && Array.isArray(data.data)) return data.data;
-  if (data && typeof data === 'object') {
-    var keys = Object.keys(data);
-    for (var i = 0; i < keys.length; i++) {
-      if (Array.isArray(data[keys[i]])) return data[keys[i]];
-    }
-  }
-  return [];
+/**
+ * TÃ©lÃ©charge et parse un fichier JSON depuis une URL HTTPS.
+ * Suit les redirections HTTP 3xx.
+ */
+function fetchJson(url, timeout = 20000) {
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; PharmaScout/1.0)',
+        'Accept':     'application/json, */*'
+      }
+    }, (res) => {
+      // Suivre les redirections
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        const loc = res.headers.location;
+        const next = loc.startsWith('http') ? loc : 'https://www.ema.europa.eu' + loc;
+        res.resume();
+        fetchJson(next, timeout).then(resolve).catch(reject);
+        return;
+      }
+      if (res.statusCode !== 200) {
+        res.resume();
+        reject(new Error(`HTTP ${res.statusCode} from ${url}`));
+        return;
+      }
+      const chunks = [];
+      res.on('data', c => chunks.push(c));
+      res.on('end', () => {
+        try {
+          resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+        } catch (e) {
+          reject(new Error('JSON parse error: ' + e.message));
+        }
+      });
+      res.on('error', reject);
+    });
+    req.on('error', reject);
+    req.setTimeout(timeout, () => {
+      req.destroy();
+      reject(new Error(`Timeout fetching ${url}`));
+    });
+  });
 }
 
-function fetchJson(url, timeoutMs) {
-  timeoutMs = timeoutMs || 20000;
+/**
+ * Télécharge une URL et retourne le texte brut (HTML).
+ */
+function fetchUrl(url, timeoutMs) {
+  timeoutMs = timeoutMs || 10000;
   return new Promise(function(resolve, reject) {
     var u;
     try { u = new URL(url); } catch(e) { return reject(e); }
@@ -143,26 +226,18 @@ function fetchJson(url, timeoutMs) {
       hostname: u.hostname,
       path:     u.pathname + u.search,
       method:   'GET',
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; PharmaScout/1.0)',
-        'Accept':     'application/json, */*'
-      }
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; PharmaScout/1.0)', 'Accept': 'text/html,*/*' }
     }, function(res) {
       if (res.statusCode === 301 || res.statusCode === 302) {
         var loc = res.headers && res.headers.location;
-        if (loc) return resolve(fetchJson(loc, timeoutMs));
+        if (loc) return resolve(fetchUrl(loc, timeoutMs));
       }
-      res.on('data', function(chunk) { chunks.push(chunk); });
+      res.on('data', function(c) { chunks.push(c); });
       res.on('end', function() {
-        try {
-          var body = Buffer.concat(chunks).toString('utf8');
-          resolve(JSON.parse(body));
-        } catch(e) {
-          reject(new Error('JSON parse error: ' + e.message));
-        }
+        resolve({ statusCode: res.statusCode, body: Buffer.concat(chunks).toString('utf8') });
       });
     });
-    req.setTimeout(timeoutMs, function() { req.destroy(); reject(new Error('timeout')); });
+    req.setTimeout(timeoutMs, function() { req.destroy(); reject(new Error('fetchUrl timeout')); });
     req.on('error', reject);
     req.end();
   });
