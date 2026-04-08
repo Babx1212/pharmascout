@@ -90,29 +90,42 @@ exports.handler = async (event) => {
 
     // --- 5. Construire la rÃ©ponse ---
     
-    // --- Produits EMA via EPAR JSON officiel (best-effort, 5s timeout) ---
+    // --- Produits EMA via JSON officiel EMA (best-effort, 8s timeout) ---
     var emaProducts = [];
+    var EMA_MEDICINES_URLS = [
+      'https://www.ema.europa.eu/en/documents/report/medicines-output-medicines_json-report_en.json',
+      'https://www.ema.europa.eu/en/documents/report/medicines-output-epar-report_en.json',
+      'https://www.ema.europa.eu/en/documents/report/medicines-output-json-report_en.json'
+    ];
     try {
       var eparResult = await Promise.race([
-        fetchJson('https://www.ema.europa.eu/en/documents/report/medicines-output-epar-report_en.json', 20000),
-        new Promise(function(res) { setTimeout(function() { res(null); }, 5000); })
+        (async function() {
+          for (var ui = 0; ui < EMA_MEDICINES_URLS.length; ui++) {
+            try {
+              var d = await fetchJson(EMA_MEDICINES_URLS[ui], 18000);
+              if (d) return d;
+            } catch(e) {}
+          }
+          return null;
+        })(),
+        new Promise(function(res) { setTimeout(function() { res(null); }, 8000); })
       ]);
       if (eparResult) {
         var eparArr = Array.isArray(eparResult) ? eparResult :
           Array.isArray(eparResult.data) ? eparResult.data :
           (function() { var k = Object.keys(eparResult||{}); for(var i=0;i<k.length;i++) { if(Array.isArray(eparResult[k[i]])) return eparResult[k[i]]; } return []; })();
         emaProducts = eparArr.filter(function(r) {
-          var fields = [r.ActiveSubstance, r['Active substance'], r.active_substance, r.INN];
+          var fields = [r.ActiveSubstance, r['Active substance'], r.active_substance, r.INN, r.inn];
           return fields.some(function(f) { return f && String(f).toLowerCase().indexOf(substance) !== -1; });
         }).slice(0, 30).map(function(r) {
           return {
-            name:   r.MedicinalProductName   || r['Medicinal product'] || r.name || '—',
-            holder: r.MarketingAuthorisationHolder || r['Marketing authorisation holder'] || r.mah || '—',
-            status: r.AuthorisationStatus    || r['Authorisation status'] || '—'
+            name:   r.MedicinalProductName   || r['Medicinal product'] || r['medicine_name'] || r.name || '—',
+            holder: r.MarketingAuthorisationHolder || r['Marketing authorisation holder'] || r.mah_name || r.mah || '—',
+            status: r.AuthorisationStatus    || r['Authorisation status'] || r.status || '—'
           };
         });
       }
-    } catch(eparErr) { /* EPAR timeout or error - keep empty, PRAC still works */ }
+    } catch(eparErr) { /* keep empty */ }
 
 return {
       statusCode: 200,
