@@ -43,15 +43,28 @@ function colIdx(hdr, names) {
 }
 
 function findHeaderRow(rows) {
-  for (var i = 0; i < Math.min(10, rows.length); i++) {
-    var lo = rows[i].map(function(h) { return String(h||'').toLowerCase().trim(); });
-    if (lo.some(function(h) {
-      return h.includes('zulassungs') || h.includes('bezeichnung') ||
-             h.includes('inhaber') || h.includes('wirkstoff') ||
-             h.includes('active substance') || h.includes('autorisation');
-    })) {
-      return i;
+  // The header row has multiple short cells matching column name keywords.
+  // Footnote rows have one very long cell - skip those.
+  for (var i = 0; i < Math.min(12, rows.length); i++) {
+    var row = rows[i];
+    var matches = 0;
+    var nonEmpty = 0;
+    for (var j = 0; j < row.length; j++) {
+      var cell = String(row[j] || '').trim();
+      if (cell.length === 0) continue;
+      // Skip rows where any cell is a long footnote (>200 chars)
+      if (cell.length > 200) { matches = -99; break; }
+      nonEmpty++;
+      var lo = cell.toLowerCase();
+      if (lo.indexOf('bezeichnung') !== -1 || lo.indexOf('dénomination') !== -1 ||
+          lo.indexOf('denomination') !== -1 || lo.indexOf('inhaber') !== -1 ||
+          lo.indexOf('titulaire') !== -1 || lo.indexOf('dosisstärke') !== -1 ||
+          lo.indexOf('dosisstarke') !== -1 || lo.indexOf('abgabekategorie') !== -1 ||
+          lo.indexOf('gültigkeitsdauer') !== -1 || lo.indexOf('autorisations') !== -1) {
+        matches++;
+      }
     }
+    if (matches >= 2 && nonEmpty >= 3) return i;
   }
   return 0;
 }
@@ -78,7 +91,7 @@ exports.handler = async function(event) {
   var debugInfo  = {};
 
   try {
-    var rows   = await Promise.race([
+    var rows = await Promise.race([
       getRows(),
       new Promise(function(_, rj) { setTimeout(function() { rj(new Error('timeout')); }, 22000); })
     ]);
@@ -89,7 +102,7 @@ exports.handler = async function(event) {
     var nameIdx   = colIdx(hdr, ['bezeichnung', 'dénomination', 'denomination', 'name']);
     var holderIdx = colIdx(hdr, ['zulassungsinhaberin', 'titulaire', 'holder', 'inhaber']);
 
-    debugInfo = { hdrIdx: hdrIdx, hdr: hdr, nameIdx: nameIdx, holderIdx: holderIdx };
+    debugInfo = { hdrIdx: hdrIdx, hdr: hdr.map(function(h){return String(h).substring(0,60);}), nameIdx: nameIdx, holderIdx: holderIdx };
 
     if (nameIdx >= 0) {
       chProducts = rows.slice(hdrIdx + 1).filter(function(r) {
@@ -117,10 +130,7 @@ exports.handler = async function(event) {
     if (html) {
       var lo = html.toLowerCase();
       pvAlert = lo.indexOf(substance) !== -1;
-      if (pvAlert) {
-        var idx = lo.indexOf(substance);
-        pvDetails = 'Vigilance News: signal détecté pour ' + substance;
-      }
+      if (pvAlert) pvDetails = 'Vigilance News: signal détecté pour ' + substance;
     }
   } catch(e) {}
 
