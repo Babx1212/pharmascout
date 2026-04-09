@@ -1,82 +1,79 @@
+/**
+ * PharmaScout - Swissmedic (CH) v3
+ * Produits CH via Excel officiel Swissmedic (MAJ mensuelle)
+ * PV alert via vigilance-news
+ */
+'use strict';
 const https = require('https');
+const XLSX  = require('xlsx');
 
-// Correct current Swissmedic URLs (verified 2025)
-const PV_URL = 'https://www.swissmedic.ch/swissmedic/en/home/humanarzneimittel/market-surveillance/pharmacovigilance/vigilance-news.html';
+const HEADERS = { 'Content-Type':'application/json','Access-Control-Allow-Origin':'*' };
+const PV_URL  = 'https://www.swissmedic.ch/swissmedic/en/home/humanarzneimittel/market-surveillance/pharmacovigilance/vigilance-news.html';
+const SW_URL  = 'https://www.swissmedic.ch/dam/swissmedic/en/dokumente/internetlisten/zugelassene_arzneimittel_ham_ind.xlsx.download.xlsx/Zugelassene_Arzneimittel_HAM.xlsx';
+const SW_TTL  = 6 * 3600 * 1000;
 
-function fetchRaw(urlStr, opts) {
-  opts = opts || {};
-  return new Promise(function(resolve, reject) {
-    var u; try { u = new URL(urlStr); } catch(e) { return reject(e); }
-    var req = https.request({
-      hostname: u.hostname, path: u.pathname + u.search, method: opts.method || 'GET',
-      headers: Object.assign({
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'text/html,*/*', 'Accept-Language': 'en-GB,en;q=0.9'
-      }, opts.headers || {})
-    }, function(res) {
-      var c = []; res.on('data', function(x) { c.push(x); });
-      res.on('end', function() { resolve({ status: res.statusCode, body: Buffer.concat(c).toString('utf8') }); });
+let _rows = null, _rowsTs = 0;
+
+function fetchBuffer(url, ms) {
+  return new Promise((res, rej) => {
+    const t = setTimeout(() => rej(new Error('timeout')), ms || 8000);
+    const req = https.get(url, { headers:{'User-Agent':'Mozilla/5.0'} }, r => {
+      if (r.statusCode >= 300 && r.statusCode < 400 && r.headers.location) {
+        clearTimeout(t);
+        fetchBuffer(r.headers.location, ms).then(res).catch(rej);
+        return;
+      }
+      const c = [];
+      r.on('data', d => c.push(d));
+      r.on('end',  () => { clearTimeout(t); res(Buffer.concat(c)); });
+      r.on('error',e => { clearTimeout(t); rej(e); });
     });
-    req.setTimeout(opts.timeout || 8000, function() { req.destroy(); reject(new Error('timeout')); });
-    req.on('error', reject);
-    if (opts.body) req.write(opts.body);
-    req.end();
+    req.on('error', e => { clearTimeout(t); rej(e); });
   });
 }
 
+function fetchText(url, ms) { return fetchBuffer(url, ms).then(b => b.toString('utf8')); }
+
+function colIdx(headers, names) {
+  const lo = headers.map(h => String(h||'').toLowerCase().trim());
+  for (const n of names) { const i = lo.findIndex(h => h.includes(n)); if (i>=0) return i; }
+  return -1;
+}
+
+async function getRows() {
+  if (_rows && Date.now()-_rowsTs < SW_TTL) return _rows;
+  const buf = await fetchBuffer(SW_URL, 8000);
+  const wb  = XLSX.read(buf, {type:'buffer'});
+  const ws  = wb.Sheets[wb.SheetNames[0]];
+  _rows   = XLSX.utils.sheet_to_json(ws, {header:1, defval:''});
+  _rowsTs = Date.now();
+  return _rows;
+}
+
 exports.handler = async function(event) {
-  var substance = ((event.queryStringParameters || {}).substance || '').trim();
-  if (!substance) return { statusCode: 400, body: JSON.stringify({ error: 'substance required' }) };
+  const substance = ((event.queryStringParameters||{}).substance||'').toLowerCase().trim();
+  if (!substance) return { statusCode:400, headers:HEADERS, body:JSON.stringify({error:'substance required'}) };
 
-  var result = {
-    substance: substance, totalCHProducts: 0, products: [],
-    pvAlert: false, pvDetails: null, aipsCount: 0,
-    searchUrl: 'https://www.swissmedic.ch/swissmedic/en/home/services/medicinal-product-information.html'
-  };
-
-  // 1. Swissmedic authorized products search
+  let swissProducts = [], debugCols = null;
   try {
-    var searchUrl = 'https://www.swissmedic.ch/swissmedic/en/home/humanarzneimittel/authorisations/authorised-human-medicinal-products.html?query=' + encodeURIComponent(substance);
-    var res = await fetchRaw(searchUrl, { timeout: 7000 });
-    if (res.status === 200 && res.body.length > 500) {
-      // Try to extract product names from table cells
-      var allTds = res.body.match(/<td[^>]*>((?:[^<]|<(?!\/td))*)<\/td>/gi) || [];
-      var prods = [];
-      for (var i = 0; i < allTds.length - 1; i += 2) {
-        var name = allTds[i].replace(/<[^>]+>/g, '').trim();
-        var holder = allTds[i+1] ? allTds[i+1].replace(/<[^>]+>/g, '').trim() : '—';
-        if (name && name.length > 2 && name.length < 100 && !/^(Name|Titulaire|Holder|Zulassung|Status)$/i.test(name)) {
-          prods.push({ name: name, holder: holder });
-        }
-      }
-      if (prods.length > 0) {
-        result.products = prods.slice(0, 30);
-        result.totalCHProducts = prods.length;
-        result.aipsCount = prods.length;
-      }
-    }
-  } catch(e) { /* silent */ }
+    const rows = await Promise.race([getRows(), new Promise((_,r)=>setTimeout(()=>r(new Error('to')),8500))]);
+    const hdr  = rows[0]||[];
+    debugCols  = hdr.slice(0,15);
+    const ni = colIdx(hdr,['name','präparat','médicament']);
+    const si = colIdx(hdr,['active substance','wirkstoff','substance active','principes actifs','inn']);
+    const hi = colIdx(hdr,['authorization holder','holder','zulassungsinhaber','titulaire','inhaber']);
+    const ci = colIdx(hdr,['dispensing category','abgabekategorie','catégorie de remise']);
+    swissProducts = rows.slice(1)
+      .filter(r => si>=0 && String(r[si]||'').toLowerCase().includes(substance))
+      .slice(0,30)
+      .map(r => ({ name:String(r[ni]||'—'), holder:String(r[hi]||'—'), status:ci>=0?String(r[ci]||'Autorisé CH'):'Autorisé CH' }));
+  } catch(e) { debugCols = {err:e.message}; }
 
-  // 2. Swissmedic Vigilance News - PV alert check (correct URL)
-  try {
-    var pvRes = await fetchRaw(PV_URL, { timeout: 7000 });
-    if (pvRes.status === 200) {
-      var pvHtml = pvRes.body;
-      var substLow = substance.toLowerCase();
-      if (pvHtml.toLowerCase().indexOf(substLow) !== -1) {
-        result.pvAlert = true;
-        // Try to find the relevant article title
-        var idx = pvHtml.toLowerCase().indexOf(substLow);
-        var before = pvHtml.substring(Math.max(0, idx - 600), idx);
-        var titleM = before.match(/<(?:h[1-6]|strong|b)[^>]*>([^<]{5,120})<\/(?:h[1-6]|strong|b)>/i);
-        result.pvDetails = titleM ? titleM[1].replace(/&amp;/g,'&').trim() : 'Vigilance News: signal détecté pour ' + substance;
-      }
-    }
-  } catch(e) { /* silent */ }
+  let pvAlert = false;
+  try { const html = await fetchText(PV_URL,5000); pvAlert = html.toLowerCase().includes(substance); } catch(_){}
 
   return {
-    statusCode: 200,
-    headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'public, max-age=3600' },
-    body: JSON.stringify(result)
+    statusCode:200, headers:HEADERS,
+    body: JSON.stringify({ substance, totalCHProducts:swissProducts.length, products:swissProducts, pvAlert, debugCols })
   };
 };
