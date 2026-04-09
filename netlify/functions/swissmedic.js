@@ -43,8 +43,6 @@ function colIdx(hdr, names) {
 }
 
 function findHeaderRow(rows) {
-  // The header row has multiple short cells matching column name keywords.
-  // Footnote rows have one very long cell - skip those.
   for (var i = 0; i < Math.min(12, rows.length); i++) {
     var row = rows[i];
     var matches = 0;
@@ -52,15 +50,13 @@ function findHeaderRow(rows) {
     for (var j = 0; j < row.length; j++) {
       var cell = String(row[j] || '').trim();
       if (cell.length === 0) continue;
-      // Skip rows where any cell is a long footnote (>200 chars)
       if (cell.length > 200) { matches = -99; break; }
       nonEmpty++;
       var lo = cell.toLowerCase();
-      if (lo.indexOf('bezeichnung') !== -1 || lo.indexOf('dénomination') !== -1 ||
-          lo.indexOf('denomination') !== -1 || lo.indexOf('inhaber') !== -1 ||
-          lo.indexOf('titulaire') !== -1 || lo.indexOf('dosisstärke') !== -1 ||
-          lo.indexOf('dosisstarke') !== -1 || lo.indexOf('abgabekategorie') !== -1 ||
-          lo.indexOf('gültigkeitsdauer') !== -1 || lo.indexOf('autorisations') !== -1) {
+      if (lo.indexOf('bezeichnung') !== -1 || lo.indexOf('denomination') !== -1 ||
+          lo.indexOf('inhaber') !== -1 || lo.indexOf('titulaire') !== -1 ||
+          lo.indexOf('dosisst') !== -1 || lo.indexOf('abgabekategorie') !== -1 ||
+          lo.indexOf('autorisation') !== -1) {
         matches++;
       }
     }
@@ -87,6 +83,17 @@ exports.handler = async function(event) {
     return { statusCode: 400, headers: HEADERS, body: JSON.stringify({ error: 'substance required' }) };
   }
 
+  // Swiss/German INN spelling often drops trailing vowel: "finasteride" -> "finasterid"
+  var terms = [substance];
+  if (substance.length > 6) {
+    var s1 = substance.slice(0, -1);
+    if (terms.indexOf(s1) === -1) terms.push(s1);
+  }
+  if (substance.length > 7) {
+    var s2 = substance.slice(0, -2);
+    if (terms.indexOf(s2) === -1) terms.push(s2);
+  }
+
   var chProducts = [];
   var debugInfo  = {};
 
@@ -99,22 +106,25 @@ exports.handler = async function(event) {
     var hdrIdx = findHeaderRow(rows);
     var hdr    = rows[hdrIdx] || [];
 
-    var nameIdx   = colIdx(hdr, ['bezeichnung', 'dénomination', 'denomination', 'name']);
+    var nameIdx   = colIdx(hdr, ['bezeichnung', 'denomination', 'name']);
     var holderIdx = colIdx(hdr, ['zulassungsinhaberin', 'titulaire', 'holder', 'inhaber']);
 
-    debugInfo = { hdrIdx: hdrIdx, hdr: hdr.map(function(h){return String(h).substring(0,60);}), nameIdx: nameIdx, holderIdx: holderIdx };
+    debugInfo = { hdrIdx: hdrIdx, nameIdx: nameIdx, holderIdx: holderIdx, terms: terms };
 
     if (nameIdx >= 0) {
-      chProducts = rows.slice(hdrIdx + 1).filter(function(r) {
+      var seen = {};
+      rows.slice(hdrIdx + 1).forEach(function(r) {
         var nm = String(r[nameIdx] || '').toLowerCase();
-        return nm.indexOf(substance) !== -1;
-      }).slice(0, 30).map(function(r) {
-        return {
-          name:   String(r[nameIdx]   || ''),
-          holder: holderIdx >= 0 ? String(r[holderIdx] || '') : '',
-          status: 'Autorisé CH'
-        };
+        var ok = terms.some(function(t) { return nm.indexOf(t) !== -1; });
+        if (!ok || seen[nm]) return;
+        seen[nm] = true;
+        chProducts.push({
+          name:   String(r[nameIdx]   || '-'),
+          holder: holderIdx >= 0 ? String(r[holderIdx] || '-') : '-',
+          status: 'Autorise CH'
+        });
       });
+      chProducts = chProducts.slice(0, 30);
     }
   } catch(e) {
     debugInfo.err = e.message;
@@ -130,7 +140,7 @@ exports.handler = async function(event) {
     if (html) {
       var lo = html.toLowerCase();
       pvAlert = lo.indexOf(substance) !== -1;
-      if (pvAlert) pvDetails = 'Vigilance News: signal détecté pour ' + substance;
+      if (pvAlert) pvDetails = 'Vigilance News: signal detecte pour ' + substance;
     }
   } catch(e) {}
 
