@@ -109,6 +109,9 @@ exports.handler = async (event) => {
       });
     }
   } catch(e) { /* silent fail */ }
+  return {
+    statusCode: 200,
+    headers: HEADERS,
     body: JSON.stringify({
         substance,
 
