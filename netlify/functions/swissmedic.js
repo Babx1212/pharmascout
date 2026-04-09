@@ -1,8 +1,3 @@
-/**
- * PharmaScout - Swissmedic (CH) v3
- * Produits CH via Excel officiel Swissmedic (MAJ mensuelle)
- * PV alert via vigilance-news
- */
 'use strict';
 const https = require('https');
 const XLSX  = require('xlsx');
@@ -19,14 +14,11 @@ function fetchBuffer(url, ms) {
     const t = setTimeout(() => rej(new Error('timeout')), ms || 8000);
     const req = https.get(url, { headers:{'User-Agent':'Mozilla/5.0'} }, r => {
       if (r.statusCode >= 300 && r.statusCode < 400 && r.headers.location) {
-        clearTimeout(t);
-        fetchBuffer(r.headers.location, ms).then(res).catch(rej);
-        return;
+        clearTimeout(t); fetchBuffer(r.headers.location, ms).then(res).catch(rej); return;
       }
-      const c = [];
-      r.on('data', d => c.push(d));
-      r.on('end',  () => { clearTimeout(t); res(Buffer.concat(c)); });
-      r.on('error',e => { clearTimeout(t); rej(e); });
+      const c = []; r.on('data', d => c.push(d));
+      r.on('end', () => { clearTimeout(t); res(Buffer.concat(c)); });
+      r.on('error', e => { clearTimeout(t); rej(e); });
     });
     req.on('error', e => { clearTimeout(t); rej(e); });
   });
@@ -38,6 +30,18 @@ function colIdx(headers, names) {
   const lo = headers.map(h => String(h||'').toLowerCase().trim());
   for (const n of names) { const i = lo.findIndex(h => h.includes(n)); if (i>=0) return i; }
   return -1;
+}
+
+// Find the real header row (skip title/subtitle rows)
+function findHeaderRow(rows) {
+  for (let i = 0; i < Math.min(10, rows.length); i++) {
+    const lo = rows[i].map(h => String(h||'').toLowerCase().trim());
+    // Header row will contain substance-related or name-related keywords
+    if (lo.some(h => h.includes('wirkstoff') || h.includes('active substance') || h.includes('name') || h.includes('inhaber') || h.includes('holder'))) {
+      return i;
+    }
+  }
+  return 0; // fallback
 }
 
 async function getRows() {
@@ -54,26 +58,27 @@ exports.handler = async function(event) {
   const substance = ((event.queryStringParameters||{}).substance||'').toLowerCase().trim();
   if (!substance) return { statusCode:400, headers:HEADERS, body:JSON.stringify({error:'substance required'}) };
 
-  let swissProducts = [], debugCols = null;
+  let swissProducts = [], debugInfo = null;
   try {
     const rows = await Promise.race([getRows(), new Promise((_,r)=>setTimeout(()=>r(new Error('to')),8500))]);
-    const hdr  = rows[0]||[];
-    debugCols  = hdr.slice(0,15);
-    const ni = colIdx(hdr,['name','präparat','médicament']);
-    const si = colIdx(hdr,['active substance','wirkstoff','substance active','principes actifs','inn']);
+    const hdrIdx = findHeaderRow(rows);
+    const hdr    = rows[hdrIdx] || [];
+    debugInfo = { hdrIdx, hdr: hdr.slice(0, 20) };
+    const ni = colIdx(hdr,['name','präparat','nom du medicament']);
+    const si = colIdx(hdr,['active substance','wirkstoff','substance active','principes actifs']);
     const hi = colIdx(hdr,['authorization holder','holder','zulassungsinhaber','titulaire','inhaber']);
-    const ci = colIdx(hdr,['dispensing category','abgabekategorie','catégorie de remise']);
-    swissProducts = rows.slice(1)
+    const ci = colIdx(hdr,['dispensing category','abgabekategorie','cat\u00e9gorie de remise','cat\u00e9gorie']);
+    swissProducts = rows.slice(hdrIdx + 1)
       .filter(r => si>=0 && String(r[si]||'').toLowerCase().includes(substance))
-      .slice(0,30)
-      .map(r => ({ name:String(r[ni]||'—'), holder:String(r[hi]||'—'), status:ci>=0?String(r[ci]||'Autorisé CH'):'Autorisé CH' }));
-  } catch(e) { debugCols = {err:e.message}; }
+      .slice(0, 30)
+      .map(r => ({ name:String(r[ni]||'\u2014'), holder:String(r[hi]||'\u2014'), status:ci>=0?String(r[ci]||'Autoris\u00e9 CH'):'Autoris\u00e9 CH' }));
+  } catch(e) { debugInfo = {err:e.message}; }
 
   let pvAlert = false;
   try { const html = await fetchText(PV_URL,5000); pvAlert = html.toLowerCase().includes(substance); } catch(_){}
 
   return {
     statusCode:200, headers:HEADERS,
-    body: JSON.stringify({ substance, totalCHProducts:swissProducts.length, products:swissProducts, pvAlert, debugCols })
+    body: JSON.stringify({ substance, totalCHProducts:swissProducts.length, products:swissProducts, pvAlert, debugInfo })
   };
 };
