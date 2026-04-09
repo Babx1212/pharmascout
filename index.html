@@ -1362,7 +1362,7 @@ function renderResults() {
     document.getElementById('reg-fda-status').style.color = _fda.color;
     document.getElementById('reg-fda-detail').textContent = _fda.detail;
   }
-  document.getElementById('m-pubmed-total').textContent = fmt(pubmed.totalPublications);
+  document.querySelectorAll('[id="m-pubmed-total"]').forEach(e=>e.textContent=fmt(pubmed.totalPublications));
   document.getElementById('m-pubmed-safety').textContent = fmt(pubmed.safetyPublications);
   document.getElementById('m-pubmed-recent').textContent = fmt(pubmed.recentSafetyPublications);
 
