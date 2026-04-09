@@ -9,76 +9,131 @@ const SW_TTL  = 6 * 3600 * 1000;
 
 let _rows = null, _rowsTs = 0;
 
-function fetchBuffer(url, ms) {
-  return new Promise((res, rej) => {
-    const t = setTimeout(() => rej(new Error('timeout')), ms || 8000);
-    const req = https.get(url, { headers:{'User-Agent':'Mozilla/5.0'} }, r => {
-      if (r.statusCode >= 300 && r.statusCode < 400 && r.headers.location) {
-        clearTimeout(t); fetchBuffer(r.headers.location, ms).then(res).catch(rej); return;
+function fetchBuffer(url, ms, _redirects) {
+  _redirects = _redirects || 0;
+  return new Promise(function(resolve, reject) {
+    if (_redirects > 5) return reject(new Error('Too many redirects'));
+    var mod = url.startsWith('https') ? require('https') : require('http');
+    var req = mod.get(url, { headers: { 'User-Agent': 'PharmaSpy/1.0' } }, function(res) {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        return resolve(fetchBuffer(res.headers.location, ms, _redirects + 1));
       }
-      const c = []; r.on('data', d => c.push(d));
-      r.on('end', () => { clearTimeout(t); res(Buffer.concat(c)); });
-      r.on('error', e => { clearTimeout(t); rej(e); });
+      var chunks = [];
+      res.on('data', function(c) { chunks.push(c); });
+      res.on('end', function() { resolve(Buffer.concat(chunks)); });
+      res.on('error', reject);
     });
-    req.on('error', e => { clearTimeout(t); rej(e); });
+    req.on('error', reject);
+    if (ms) req.setTimeout(ms, function() { req.destroy(new Error('timeout')); });
   });
 }
 
-function fetchText(url, ms) { return fetchBuffer(url, ms).then(b => b.toString('utf8')); }
+function fetchText(url, ms) {
+  return fetchBuffer(url, ms).then(function(b) { return b.toString('utf8'); });
+}
 
-function colIdx(headers, names) {
-  const lo = headers.map(h => String(h||'').toLowerCase().trim());
-  for (const n of names) { const i = lo.findIndex(h => h.includes(n)); if (i>=0) return i; }
+function colIdx(hdr, names) {
+  for (var i = 0; i < hdr.length; i++) {
+    var h = String(hdr[i] || '').toLowerCase().replace(/[\r\n]+/g,' ').trim();
+    for (var j = 0; j < names.length; j++) {
+      if (h.indexOf(names[j]) !== -1) return i;
+    }
+  }
   return -1;
 }
 
-// Find the real header row (skip title/subtitle rows)
 function findHeaderRow(rows) {
-  for (let i = 0; i < Math.min(10, rows.length); i++) {
-    const lo = rows[i].map(h => String(h||'').toLowerCase().trim());
-    // Header row will contain substance-related or name-related keywords
-    if (lo.some(h => h.includes('wirkstoff') || h.includes('active substance') || h.includes('name') || h.includes('inhaber') || h.includes('holder'))) {
+  for (var i = 0; i < Math.min(10, rows.length); i++) {
+    var lo = rows[i].map(function(h) { return String(h||'').toLowerCase().trim(); });
+    if (lo.some(function(h) {
+      return h.includes('zulassungs') || h.includes('bezeichnung') ||
+             h.includes('inhaber') || h.includes('wirkstoff') ||
+             h.includes('active substance') || h.includes('autorisation');
+    })) {
       return i;
     }
   }
-  return 0; // fallback
+  return 0;
 }
 
 async function getRows() {
-  if (_rows && Date.now()-_rowsTs < SW_TTL) return _rows;
-  const buf = await fetchBuffer(SW_URL, 8000);
-  const wb  = XLSX.read(buf, {type:'buffer'});
-  const ws  = wb.Sheets[wb.SheetNames[0]];
-  _rows   = XLSX.utils.sheet_to_json(ws, {header:1, defval:''});
-  _rowsTs = Date.now();
-  return _rows;
+  var now = Date.now();
+  if (_rows && (now - _rowsTs) < SW_TTL) return _rows;
+  var buf = await fetchBuffer(SW_URL, 25000);
+  var wb  = XLSX.read(buf, { type: 'buffer' });
+  var ws  = wb.Sheets[wb.SheetNames[0]];
+  var all = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+  _rows = all;
+  _rowsTs = now;
+  return all;
 }
 
 exports.handler = async function(event) {
-  const substance = ((event.queryStringParameters||{}).substance||'').toLowerCase().trim();
-  if (!substance) return { statusCode:400, headers:HEADERS, body:JSON.stringify({error:'substance required'}) };
+  var substance = ((event.queryStringParameters || {}).substance || '').toLowerCase().trim();
+  if (!substance) {
+    return { statusCode: 400, headers: HEADERS, body: JSON.stringify({ error: 'substance required' }) };
+  }
 
-  let swissProducts = [], debugInfo = null;
+  var chProducts = [];
+  var debugInfo  = {};
+
   try {
-    const rows = await Promise.race([getRows(), new Promise((_,r)=>setTimeout(()=>r(new Error('to')),8500))]);
-    const hdrIdx = findHeaderRow(rows);
-    const hdr    = rows[hdrIdx] || [];
-    debugInfo = { hdrIdx, hdr: hdr.slice(0, 20) };
-    const ni = colIdx(hdr,['name','prÃ¤parat','nom du medicament']);
-    const si = colIdx(hdr,['active substance','wirkstoff','substance active','principes actifs']);
-    const hi = colIdx(hdr,['authorization holder','holder','zulassungsinhaber','titulaire','inhaber']);
-    const ci = colIdx(hdr,['dispensing category','abgabekategorie','cat\u00e9gorie de remise','cat\u00e9gorie']);
-    swissProducts = rows.slice(hdrIdx + 1)
-      .filter(r => si>=0 && String(r[si]||'').toLowerCase().includes(substance))
-      .slice(0, 30)
-      .map(r => ({ name:String(r[ni]||'\u2014'), holder:String(r[hi]||'\u2014'), status:ci>=0?String(r[ci]||'Autoris\u00e9 CH'):'Autoris\u00e9 CH' }));
-  } catch(e) { debugInfo = {err:e.message}; }
+    var rows   = await Promise.race([
+      getRows(),
+      new Promise(function(_, rj) { setTimeout(function() { rj(new Error('timeout')); }, 22000); })
+    ]);
 
-  let pvAlert = false;
-  try { const html = await fetchText(PV_URL,5000); pvAlert = html.toLowerCase().includes(substance); } catch(_){}
+    var hdrIdx = findHeaderRow(rows);
+    var hdr    = rows[hdrIdx] || [];
+
+    var nameIdx   = colIdx(hdr, ['bezeichnung', 'dénomination', 'denomination', 'name']);
+    var holderIdx = colIdx(hdr, ['zulassungsinhaberin', 'titulaire', 'holder', 'inhaber']);
+
+    debugInfo = { hdrIdx: hdrIdx, hdr: hdr, nameIdx: nameIdx, holderIdx: holderIdx };
+
+    if (nameIdx >= 0) {
+      chProducts = rows.slice(hdrIdx + 1).filter(function(r) {
+        var nm = String(r[nameIdx] || '').toLowerCase();
+        return nm.indexOf(substance) !== -1;
+      }).slice(0, 30).map(function(r) {
+        return {
+          name:   String(r[nameIdx]   || ''),
+          holder: holderIdx >= 0 ? String(r[holderIdx] || '') : '',
+          status: 'Autorisé CH'
+        };
+      });
+    }
+  } catch(e) {
+    debugInfo.err = e.message;
+  }
+
+  var pvAlert   = false;
+  var pvDetails = '';
+  try {
+    var html = await Promise.race([
+      fetchText(PV_URL, 7000),
+      new Promise(function(r) { setTimeout(function() { r(''); }, 6000); })
+    ]);
+    if (html) {
+      var lo = html.toLowerCase();
+      pvAlert = lo.indexOf(substance) !== -1;
+      if (pvAlert) {
+        var idx = lo.indexOf(substance);
+        pvDetails = 'Vigilance News: signal détecté pour ' + substance;
+      }
+    }
+  } catch(e) {}
 
   return {
-    statusCode:200, headers:HEADERS,
-    body: JSON.stringify({ substance, totalCHProducts:swissProducts.length, products:swissProducts, pvAlert, debugInfo })
+    statusCode: 200,
+    headers: HEADERS,
+    body: JSON.stringify({
+      substance:       substance,
+      totalCHProducts: chProducts.length,
+      products:        chProducts,
+      pvAlert:         pvAlert,
+      pvDetails:       pvDetails,
+      debugInfo:       debugInfo
+    })
   };
 };
