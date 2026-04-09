@@ -1,8 +1,8 @@
 /**
- * PharmaScout â Netlify Function : EMA Proxy (v4)
- * Utilise les JSON data files officiels de l'EMA (mis Ã  jour 2x/jour).
+ * PharmaScout Ã¢ÂÂ Netlify Function : EMA Proxy (v4)
+ * Utilise les JSON data files officiels de l'EMA (mis ÃÂ  jour 2x/jour).
  * - Referrals JSON : 709 KB, contient tous les referrals PRAC
- * - DHPCs JSON    : communications directes professionnels de santÃ©
+ * - DHPCs JSON    : communications directes professionnels de santÃÂ©
  * Cache module-level (persist entre invocations warm Lambda).
  */
 
@@ -32,7 +32,7 @@ exports.handler = async (event) => {
   }
 
   try {
-    // --- 1. Charger / rafraÃ®chir le cache EMA ---
+    // --- 1. Charger / rafraÃÂ®chir le cache EMA ---
     const now = Date.now();
     if (!_cache.referrals || (now - _cache.ts) > CACHE_TTL) {
       const [refData, dhpcData] = await Promise.all([
@@ -44,9 +44,9 @@ exports.handler = async (event) => {
       _cache.ts = now;
     }
 
-    // --- 2. Construire les mots-clÃ©s de recherche ---
-    // DÃ©compose la substance en mots (ex: "finasteride" â ["finasteride"])
-    // TolÃ¨re les substances composÃ©es (ex: "finasteride dutasteride")
+    // --- 2. Construire les mots-clÃÂ©s de recherche ---
+    // DÃÂ©compose la substance en mots (ex: "finasteride" Ã¢ÂÂ ["finasteride"])
+    // TolÃÂ¨re les substances composÃÂ©es (ex: "finasteride dutasteride")
     const substanceClean = substance.replace(/[^a-z0-9\s]/g, ' ').trim();
     const keywords = [...new Set(
       substanceClean.split(/\s+/).filter(w => w.length >= 4)
@@ -65,7 +65,7 @@ exports.handler = async (event) => {
           || matchesSubstance(r.referral_name);
     });
 
-    // Trier : safety referrals en premier, puis par date de dÃ©cision (plus rÃ©cent)
+    // Trier : safety referrals en premier, puis par date de dÃÂ©cision (plus rÃÂ©cent)
     matchingReferrals.sort((a, b) => {
       if (a.safety_referral === 'Yes' && b.safety_referral !== 'Yes') return -1;
       if (a.safety_referral !== 'Yes' && b.safety_referral === 'Yes') return 1;
@@ -88,48 +88,35 @@ exports.handler = async (event) => {
       type:     d.dhpc_type          || ''
     }));
 
-    // --- 5. Construire la rÃ©ponse ---
+    // --- 5. Construire la rÃÂ©ponse ---
     
     var emaProducts = [];
-    var emaDebug = {};
-    try {
-      var medData = await Promise.race([
-        fetchJson('https://www.ema.europa.eu/en/documents/report/medicines-output-medicines_json-report_en.json', 18000),
-        new Promise(function(r) { setTimeout(function() { r(null); }, 8000); })
-      ]);
-      if (medData) {
-        var arr = Array.isArray(medData) ? medData : (medData.data || []);
-        emaDebug.totalEntries = arr.length;
-        emaDebug.allKeys = arr[0] ? Object.keys(arr[0]) : [];
-        // Search for substance in ALL string fields
-        var matches = arr.filter(function(r) {
-          return Object.values(r).some(function(v) {
-            return v && String(v).toLowerCase().indexOf(substance) !== -1;
-          });
-        });
-        emaDebug.matchCount = matches.length;
-        emaDebug.first2 = matches.slice(0,2);
-        emaProducts = matches.slice(0,30).map(function(r) {
-          return {
-            name: r.name_of_medicine || r.medicine_name || r.name || '—',
-            holder: r.marketing_authorisation_holder || r.mah || r.holder || '—',
-            status: r.medicine_status || r.status || '—'
-          };
-        });
-      }
-    } catch(e) { emaDebug.err = e.message; }
-
-return {
-      statusCode: 200,
-      headers: HEADERS,
-      body: JSON.stringify({
+  try {
+    var medData = await Promise.race([
+      fetchJson('https://www.ema.europa.eu/en/documents/report/medicines-output-medicines_json-report_en.json', 18000),
+      new Promise(function(r) { setTimeout(function() { r(null); }, 8000); })
+    ]);
+    if (medData) {
+      var arr = Array.isArray(medData) ? medData : (medData.data || []);
+      emaProducts = arr.filter(function(r) {
+        return r.active_substance && r.active_substance.toLowerCase().indexOf(substance) !== -1;
+      }).slice(0, 30).map(function(r) {
+        return {
+          name: r.name_of_medicine || '—',
+          holder: r.marketing_authorisation_developer_applicant_holder || '—',
+          status: r.medicine_status || '—'
+        };
+      });
+    }
+  } catch(e) { /* silent fail */ }
+    body: JSON.stringify({
         substance,
 
-        // Produits centralement autorisÃ©s par l'EMA (molÃ©cules nationales = 0, c'est correct)
+        // Produits centralement autorisÃÂ©s par l'EMA (molÃÂ©cules nationales = 0, c'est correct)
         totalEUProducts: emaProducts.length,
         products: emaProducts,
 
-        // Signal de sÃ©curitÃ© PRAC
+        // Signal de sÃÂ©curitÃÂ© PRAC
         pracActive,
         pracDetails:        mainRef ? mainRef.referral_name                        : null,
         pracUrl:            mainRef ? mainRef.referral_url                         : null,
@@ -152,7 +139,7 @@ return {
           decisionDate:    r.european_commission_decision_date
         })),
 
-        // DHPCs (communications sÃ©curitÃ©)
+        // DHPCs (communications sÃÂ©curitÃÂ©)
         dhpcs: matchingDhpcs,
         hasDhpc: matchingDhpcs.length > 0,
 
@@ -161,7 +148,7 @@ return {
 
         // Lien de recherche EMA
         searchUrl: `https://www.ema.europa.eu/en/search?search_api_fulltext=${encodeURIComponent(substance)}`,
-        cacheAge: Math.round((now - _cache.ts) / 1000 / 60), emaDebug: emaDebug
+        cacheAge: Math.round((now - _cache.ts) / 1000 / 60)
       })
     };
 
@@ -175,7 +162,7 @@ return {
 };
 
 /**
- * TÃ©lÃ©charge et parse un fichier JSON depuis une URL HTTPS.
+ * TÃÂ©lÃÂ©charge et parse un fichier JSON depuis une URL HTTPS.
  * Suit les redirections HTTP 3xx.
  */
 function fetchJson(url, timeout = 20000) {
