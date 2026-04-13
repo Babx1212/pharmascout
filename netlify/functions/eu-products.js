@@ -13,7 +13,7 @@ const FR_URL = 'https://base-donnees-publique.medicaments.gouv.fr/index.php/down
 var _beVersion = null, _beVersionTs = 0;
 const BE_TTL = 6 * 3600 * 1000;
 const BE_BASE = 'https://www.vas.ehealth.fgov.be/websamcivics/samcivics/download/';
-const MAX_SAM_BYTES = 20 * 1024 * 1024; // 20 MB compressed limit
+const MAX_SAM_BYTES = 60 * 1024 * 1024; // 60 MB compressed limit (covers multiple ZIP files)
 
 // helpers
 function fetchTextNode(url, timeoutMs) {
@@ -76,18 +76,23 @@ function ptDCI(terms) {
   return cand.charAt(0).toUpperCase() + cand.slice(1);
 }
 
-// Belgium: stream ZIP-compressed SAM XML, search OfficialName elements
+// Belgium: stream ZIP-compressed SAM XML, handles multi-file ZIP, searches OfficialName
 function streamSearchSAM(url, terms) {
   return new Promise(function(resolve) {
     var products = [], textBuf = '', done = false, xmlStart = '';
-    var rawBuf = Buffer.alloc(0), headerParsed = false;
-    var inflate = null, bytesIn = 0;
+    var buf = Buffer.alloc(0), bytesIn = 0;
+    var inflate = null;
+    // ZIP state machine: SEEK=looking for header, SKIP=skipping known bytes, INFLATE=decompressing
+    var zipState = 'SEEK';
+    var skipLeft = 0;       // bytes left to skip in SKIP state
+    var inflateLeft = 0;    // compressed bytes left to feed inflate (0 = unknown/data-descriptor)
+    var filesChecked = [];  // debug: file names seen
 
     function finish() {
       if (!done) {
         done = true;
         if (inflate) { try { inflate.destroy(); } catch(e) {} }
-        resolve({ products: products, xmlStart: xmlStart });
+        resolve({ products: products, xmlStart: xmlStart, filesChecked: filesChecked });
       }
     }
 
@@ -95,7 +100,6 @@ function streamSearchSAM(url, terms) {
       if (done) return;
       textBuf += text;
       if (!xmlStart && textBuf.length >= 2000) xmlStart = textBuf.substring(0, 2000);
-
       var bufL = textBuf.toLowerCase();
       var pos = 0;
       while (true) {
@@ -120,52 +124,118 @@ function streamSearchSAM(url, terms) {
       if (textBuf.length > 15000) textBuf = textBuf.substring(textBuf.length - 5000);
     }
 
-    function handleChunk(chunk) {
+    function startInflate(wanted, compressedSize) {
+      inflate = zlib.createInflateRaw();
+      inflateLeft = compressedSize; // 0 = data-descriptor (unknown size)
+      if (wanted) {
+        inflate.on('data', function(c) { processText(c.toString('utf8')); });
+      } else {
+        inflate.on('data', function() {}); // discard
+      }
+      inflate.on('end', function() {
+        inflate = null;
+        zipState = 'SEEK';
+        // Continue processing buffered bytes
+        setImmediate(processBuffer);
+      });
+      inflate.on('error', function() {
+        inflate = null;
+        zipState = 'SEEK';
+        setImmediate(processBuffer);
+      });
+      zipState = 'INFLATE';
+    }
+
+    function processBuffer() {
       if (done) return;
-      if (!headerParsed) {
-        rawBuf = Buffer.concat([rawBuf, chunk]);
-        if (rawBuf.length < 30) return;
-        // Check ZIP signature: PK\x03\x04
-        if (rawBuf[0] === 0x50 && rawBuf[1] === 0x4B && rawBuf[2] === 0x03 && rawBuf[3] === 0x04) {
-          var fileNameLen = rawBuf.readUInt16LE(26);
-          var extraLen = rawBuf.readUInt16LE(28);
-          var dataStart = 30 + fileNameLen + extraLen;
-          if (rawBuf.length < dataStart) return; // need more bytes
-          inflate = zlib.createInflateRaw();
-          inflate.on('data', function(c) { processText(c.toString('utf8')); });
-          inflate.on('end', finish);
-          inflate.on('error', finish);
-          headerParsed = true;
-          inflate.write(rawBuf.slice(dataStart));
+      // Feed inflate if active
+      if (zipState === 'INFLATE' && inflate) {
+        if (inflateLeft > 0) {
+          // Known size: send exactly inflateLeft bytes
+          var toSend = Math.min(buf.length, inflateLeft);
+          if (toSend === 0) return;
+          var chunk = buf.slice(0, toSend);
+          buf = buf.slice(toSend);
+          inflateLeft -= toSend;
+          inflate.write(chunk);
+          if (inflateLeft === 0) inflate.end(); // signal end-of-stream
         } else {
-          // Plain XML (not ZIP)
-          headerParsed = true;
-          processText(rawBuf.toString('utf8'));
+          // Unknown size (data descriptor): feed all, inflate fires 'end' naturally
+          var all = buf;
+          buf = Buffer.alloc(0);
+          inflate.write(all);
         }
-        rawBuf = Buffer.alloc(0);
         return;
       }
-      if (inflate) inflate.write(chunk);
+
+      // State machine loop
+      while (buf.length > 0 && !done && zipState !== 'INFLATE') {
+        if (zipState === 'SKIP') {
+          var skip = Math.min(buf.length, skipLeft);
+          buf = buf.slice(skip);
+          skipLeft -= skip;
+          if (skipLeft === 0) zipState = 'SEEK';
+
+        } else { // SEEK
+          if (buf.length < 4) return;
+          // Must start with PK\x03\x04
+          if (buf[0] === 0x50 && buf[1] === 0x4B && buf[2] === 0x03 && buf[3] === 0x04) {
+            if (buf.length < 30) return;
+            var bitFlag      = buf.readUInt16LE(6);
+            var compSize     = buf.readUInt32LE(18);
+            var fileNameLen  = buf.readUInt16LE(26);
+            var extraLen     = buf.readUInt16LE(28);
+            var hdrSize      = 30 + fileNameLen + extraLen;
+            if (buf.length < hdrSize) return;
+            var fileName = buf.slice(30, 30 + fileNameLen).toString('utf8');
+            var hasDD = (bitFlag & 0x08) !== 0;
+            filesChecked.push(fileName);
+            buf = buf.slice(hdrSize);
+            // AMP files have product name data; skip ChapterIV/Reimbursement
+            var wanted = !fileName.match(/chapteriv|chapter_iv|reimburs|terugbetal/i);
+            if (!hasDD && compSize > 0) {
+              startInflate(wanted, compSize);
+            } else if (!wanted && !hasDD && compSize === 0) {
+              // Empty file, nothing to do
+            } else {
+              // Data descriptor or zero size: inflate to find stream end
+              startInflate(wanted, 0);
+            }
+          } else {
+            // Scan forward for next PK\x03\x04
+            var pk = -1;
+            for (var i = 1; i + 3 < buf.length; i++) {
+              if (buf[i] === 0x50 && buf[i+1] === 0x4B && buf[i+2] === 0x03 && buf[i+3] === 0x04) {
+                pk = i; break;
+              }
+            }
+            if (pk === -1) { buf = buf.length > 3 ? buf.slice(buf.length - 3) : buf; return; }
+            buf = buf.slice(pk);
+          }
+        }
+      }
     }
 
     var lib = url.startsWith('https') ? https : http;
     var req = lib.get(url, { headers: { 'User-Agent': 'Mozilla/5.0 PharmaScout/1.0' } }, function(res) {
       if (res.statusCode === 301 || res.statusCode === 302) {
-        streamSearchSAM(res.headers.location, terms).then(resolve);
-        return;
+        streamSearchSAM(res.headers.location, terms).then(resolve); return;
       }
       if (res.statusCode !== 200) { finish(); return; }
       res.on('data', function(chunk) {
         bytesIn += chunk.length;
         if (done) return;
-        handleChunk(chunk);
+        buf = Buffer.concat([buf, chunk]);
+        processBuffer();
         if (bytesIn > MAX_SAM_BYTES) { finish(); }
       });
-      res.on('end', function() { if (inflate && !done) inflate.end(); else finish(); });
+      res.on('end', function() {
+        if (inflate && !done) inflate.end(); else finish();
+      });
       res.on('error', finish);
     });
     req.on('error', finish);
-    req.setTimeout(22000, function() { req.destroy(); finish(); });
+    req.setTimeout(25000, function() { req.destroy(); finish(); });
   });
 }
 
@@ -237,7 +307,8 @@ async function fetchBelgium(substance, terms) {
     var ampUrl = BE_BASE + 'samv2-download?type=AMP&xsd=5&version=' + _beVersion;
     beDebug.ampUrl = ampUrl;
     var result = await streamSearchSAM(ampUrl, terms);
-    beDebug.xmlStart = result.xmlStart ? result.xmlStart.substring(0, 500) : 'none';
+    beDebug.xmlStart = result.xmlStart ? result.xmlStart.substring(0, 300) : 'none';
+    beDebug.filesChecked = result.filesChecked || [];
     return { products: result.products, debug: beDebug };
   } catch(e) {
     beDebug.error = e.message;
