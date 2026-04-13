@@ -1,18 +1,18 @@
 'use strict';
 const HEADERS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' };
 
-// ── France BDPM cache ────────────────────────────────────────────────────────
+// France BDPM cache
 var _frRows = null, _frTs = 0;
 const FR_TTL = 6 * 3600 * 1000;
-const FR_URL = 'https://base-donnees-publique.medicaments.gouv.fr/telechargement.php?fichier=CIS_bdpm.txt';
+const FR_URL = 'https://base-donnees-publique.medicaments.gouv.fr/index.php/download/file/CIS_bdpm.txt';
 
-// ── Belgium SAM cache ────────────────────────────────────────────────────────
+// Belgium SAM cache
 var _beVersion = null, _beVersionTs = 0;
 const BE_TTL = 6 * 3600 * 1000;
 const BE_BASE = 'https://www.vas.ehealth.fgov.be/websamcivics/samcivics/download/';
 const MAX_SAM_BYTES = 7 * 1024 * 1024;
 
-// ── helpers ──────────────────────────────────────────────────────────────────
+// helpers
 function fetchText(url, timeoutMs) {
   return new Promise(function(resolve, reject) {
     var done = false;
@@ -36,13 +36,11 @@ function fetchText(url, timeoutMs) {
 }
 
 // buildTerms: covers DE/FR/ES/PT INN variants
-// e.g. finasteride -> [finasteride, finasteri, finasterida]
-//      metformin   -> [metformin, metformina]
 function buildTerms(s) {
   var t = [s];
   if (s.endsWith('ide') && s.length > 6) {
-    t.push(s.slice(0, -1));       // finasterid (DE)
-    t.push(s.slice(0, -1) + 'a'); // finasterida (ES/PT)
+    t.push(s.slice(0, -1));
+    t.push(s.slice(0, -1) + 'a');
   }
   if (s.endsWith('ole') && s.length > 5) t.push(s.slice(0, -1));
   if (s.endsWith('ine') && s.length > 5) t.push(s.slice(0, -1) + 'a');
@@ -63,20 +61,21 @@ function holderFromName(name) {
   return m ? m[1].trim() : '';
 }
 
-// ── Portugal DCI ─────────────────────────────────────────────────────────────
+// Portugal DCI
 function ptDCI(terms) {
   var cand = terms.find(function(t) { return t.endsWith('a'); });
   if (!cand) cand = terms[0] + 'a';
   return cand.charAt(0).toUpperCase() + cand.slice(1);
 }
 
-// ── Belgium SAM streaming XML search ─────────────────────────────────────────
+// Belgium SAM streaming XML search
+// Searches for OfficialName elements (handles any namespace prefix)
 function streamSearchSAM(url, terms) {
   return new Promise(function(resolve) {
-    var results = [], buf = '', bytesRead = 0, done = false;
+    var products = [], buf = '', bytesRead = 0, done = false, xmlStart = '';
 
     function finish() {
-      if (!done) { done = true; resolve(results); }
+      if (!done) { done = true; resolve({ products: products, xmlStart: xmlStart }); }
     }
 
     fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 PharmaScout/1.0' } })
@@ -92,31 +91,50 @@ function streamSearchSAM(url, terms) {
             bytesRead += chunk.value.length;
             buf += dec.decode(chunk.value, { stream: true });
 
-            // parse complete <amp>...</amp> blocks
+            // Capture first 2000 chars for debug
+            if (!xmlStart && buf.length >= 2000) xmlStart = buf.substring(0, 2000);
+
+            // Search for OfficialName elements (case-insensitive)
+            var bufL = buf.toLowerCase();
             var pos = 0;
             while (true) {
-              var start = buf.indexOf('<amp>', pos);
-              if (start === -1) break;
-              var end = buf.indexOf('</amp>', start);
-              if (end === -1) break;
-              var block = buf.substring(start, end + 6);
-              pos = end + 6;
+              var idx = bufL.indexOf('officialname', pos);
+              if (idx === -1) break;
 
-              // Extract OfficialName
-              var nm = block.match(/<officialName[^>]*>([^<]+)<\/officialName>/i);
-              if (!nm) continue;
-              var name = nm[1].trim();
-              if (!matchesTerms(name, terms)) continue;
+              // Walk back to find the '<' of the opening tag
+              var lt = buf.lastIndexOf('<', idx);
+              if (lt === -1 || lt < idx - 60) { pos = idx + 1; continue; }
 
-              // Extract MAH name
-              var mah = block.match(/<name[^>]*>([^<]+)<\/name>/i);
-              var holder = mah ? mah[1].trim() : '';
+              // Skip if this is a closing tag </...OfficialName>
+              if (buf[lt + 1] === '/') { pos = idx + 1; continue; }
 
-              results.push({ name: name, holder: holder, status: 'Autorisé' });
-              if (results.length >= 30) { finish(); return; }
+              // Find end '>' of the opening tag
+              var gt = buf.indexOf('>', idx);
+              if (gt === -1) break; // tag not yet complete — wait for more data
+
+              // Extract content between '>' and next '<'
+              var contentStart = gt + 1;
+              var nextLt = buf.indexOf('<', contentStart);
+              if (nextLt === -1) break; // content not yet complete
+
+              var name = buf.substring(contentStart, nextLt).trim();
+              pos = nextLt;
+
+              if (!name || !matchesTerms(name, terms)) continue;
+
+              // Extract MAH: look for a <Name> element in next 5000 chars
+              var ctx = buf.substring(lt, Math.min(buf.length, lt + 5000));
+              var mahM = ctx.match(/<[^>]{0,40}[Nn]ame[^>]{0,40}>([A-Za-z][^<]{2,70})<\/[^>]{0,40}[Nn]ame>/);
+              var holder = mahM ? mahM[1].trim() : '';
+
+              products.push({ name: name, holder: holder, status: 'Autoris\u00e9' });
+              if (products.length >= 30) { finish(); return; }
             }
-            // keep tail
-            buf = buf.substring(pos);
+
+            // Keep 5000 chars of tail to not miss split elements
+            if (buf.length > 15000) {
+              buf = buf.substring(buf.length - 5000);
+            }
 
             if (bytesRead > MAX_SAM_BYTES) { finish(); return; }
             pump();
@@ -128,13 +146,12 @@ function streamSearchSAM(url, terms) {
   });
 }
 
-// ── country fetchers ──────────────────────────────────────────────────────────
+// country fetchers
 
 async function fetchFrance(substance, terms) {
   var now = Date.now();
   if (!_frRows || now - _frTs > FR_TTL) {
-    var txt = await fetchText(FR_URL, 20000);
-    // Split on \r\n or \n (Windows and Unix line endings)
+    var txt = await fetchText(FR_URL, 25000);
     _frRows = txt.split(/\r?\n/);
     _frTs = now;
   }
@@ -145,9 +162,6 @@ async function fetchFrance(substance, terms) {
     if (!line) continue;
     var cols = line.split('\t');
     if (cols.length < 8) continue;
-    // cols[4] = AMM status: "Autorisation active"
-    // cols[7] = commercialization: "Commercialis\u00e9e"
-    // Use indexOf to avoid any accented-char encoding issues in source code
     if (cols[4] !== 'Autorisation active') continue;
     if (cols[7].indexOf('Commercialis') !== 0) continue;
     var name = cols[1] || '';
@@ -159,8 +173,10 @@ async function fetchFrance(substance, terms) {
 }
 
 async function fetchSpain(substance, terms) {
+  // CIMA needs the Spanish INN name (ends in 'a' for most substances)
+  var spanishTerm = terms.find(function(t) { return t.endsWith('a'); }) || (substance + 'a');
   var url = 'https://cima.aemps.es/cima/rest/medicamentos?nombre=' +
-    encodeURIComponent(substance) + '&pagina=1&tamanioPagina=100';
+    encodeURIComponent(spanishTerm) + '&pagina=1&tamanioPagina=100';
   var txt = await fetchText(url, 15000);
   var data = JSON.parse(txt);
   var items = data.resultados || [];
@@ -170,7 +186,7 @@ async function fetchSpain(substance, terms) {
     if (!m.comerc) continue;
     var name = m.nombre || '';
     if (!matchesTerms(name, terms)) continue;
-    products.push({ name: name, holder: m.labtitular || '', status: 'Autorisé' });
+    products.push({ name: name, holder: m.labtitular || '', status: 'Autoris\u00e9' });
     if (products.length >= 50) break;
   }
   return products;
@@ -192,16 +208,17 @@ async function fetchBelgium(substance, terms) {
 
     if (!_beVersion) throw new Error('empty version');
 
-    // Step 2: stream the SAM XML
+    // Step 2: stream the SAM XML and search for OfficialName elements
     var ampUrl = BE_BASE + 'samv2-download?type=FULL&xsd=5&version=' + _beVersion;
     beDebug.ampUrl = ampUrl;
 
-    var products = await streamSearchSAM(ampUrl, terms);
-    return { products: products, debug: beDebug };
+    var result = await streamSearchSAM(ampUrl, terms);
+    beDebug.xmlStart = result.xmlStart ? result.xmlStart.substring(0, 800) : 'none';
+    return { products: result.products, debug: beDebug };
 
   } catch(e) {
     beDebug.error = e.message;
-    _beVersion = null; // reset cache so next call retries
+    _beVersion = null;
     return { products: [], debug: beDebug };
   }
 }
@@ -213,22 +230,21 @@ async function fetchPortugal(substance, terms) {
     '?tabela=dispt&fonte=dci&escolha_dci=' + encodeURIComponent(b64);
   var txt = await fetchText(url, 15000);
   var products = [];
-  // Parse <td> cells: name in col 0, holder in col 2
   var rows = txt.match(/<tr[^>]*>[\s\S]*?<\/tr>/gi) || [];
   for (var i = 0; i < rows.length; i++) {
     var cells = rows[i].match(/<td[^>]*>([\s\S]*?)<\/td>/gi) || [];
     if (cells.length < 3) continue;
-    function stripTags(s) { return s.replace(/<[^>]+>/g, '').replace(/&amp;/g,'&').replace(/&nbsp;/g,' ').trim(); }
+    function stripTags(s) { return s.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ').trim(); }
     var name = stripTags(cells[0]);
     var holder = stripTags(cells[2]);
     if (!name || !matchesTerms(name, terms)) continue;
-    products.push({ name: name, holder: holder, status: 'Autorisé' });
+    products.push({ name: name, holder: holder, status: 'Autoris\u00e9' });
     if (products.length >= 50) break;
   }
   return products;
 }
 
-// ── main handler ─────────────────────────────────────────────────────────────
+// main handler
 exports.handler = async function(event) {
   var substance = ((event.queryStringParameters || {}).substance || '').toLowerCase().trim();
   if (!substance) {
