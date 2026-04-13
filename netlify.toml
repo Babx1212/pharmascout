@@ -1,7 +1,7 @@
 [build]
   functions = "netlify/functions"
 
-[functions]
+[functions."eu-products"]
   timeout = 26
 
 [[headers]]
