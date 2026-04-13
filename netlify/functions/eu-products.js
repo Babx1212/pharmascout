@@ -1,44 +1,9 @@
 'use strict';
-const zlib = require('zlib');
 const https = require('https');
 const http = require('http');
 const HEADERS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' };
 
-// France BDPM cache
-var _frRows = null, _frTs = 0;
-const FR_TTL = 6 * 3600 * 1000;
-const FR_URL = 'https://base-donnees-publique.medicaments.gouv.fr/index.php/download/file/CIS_bdpm.txt';
-
-// helpers
-function fetchTextNode(url, timeoutMs) {
-  return new Promise(function(resolve, reject) {
-    var done = false;
-    var lib = url.startsWith('https') ? https : http;
-    var req = lib.get(url, { headers: { 'User-Agent': 'Mozilla/5.0 PharmaScout/1.0' } }, function(res) {
-      if (res.statusCode === 301 || res.statusCode === 302) {
-        if (!done) { done = true; fetchTextNode(res.headers.location, timeoutMs).then(resolve).catch(reject); }
-        return;
-      }
-      if (res.statusCode !== 200) {
-        if (!done) { done = true; reject(new Error('HTTP ' + res.statusCode)); }
-        return;
-      }
-      var chunks = [];
-      res.on('data', function(c) { chunks.push(c); });
-      res.on('end', function() {
-        if (!done) { done = true; resolve(Buffer.concat(chunks).toString('latin1')); }
-      });
-      res.on('error', function(e) { if (!done) { done = true; reject(e); } });
-    });
-    req.on('error', function(e) { if (!done) { done = true; reject(e); } });
-    req.setTimeout(timeoutMs || 20000, function() {
-      req.destroy();
-      if (!done) { done = true; reject(new Error('timeout')); }
-    });
-  });
-}
-
-// UTF-8 fetch for JSON/XML APIs (Belgium SAM, Spain CIMA)
+// UTF-8 fetch for all JSON APIs
 function fetchApiText(url, timeoutMs) {
   return new Promise(function(resolve, reject) {
     var done = false;
@@ -66,14 +31,43 @@ function fetchApiText(url, timeoutMs) {
       res.on('error', function(e) { if (!done) { done = true; reject(e); } });
     });
     req.on('error', function(e) { if (!done) { done = true; reject(e); } });
-    req.setTimeout(timeoutMs || 15000, function() {
+    req.setTimeout(timeoutMs || 10000, function() {
       req.destroy();
       if (!done) { done = true; reject(new Error('timeout')); }
     });
   });
 }
 
-// buildTerms: covers DE/FR/ES/PT INN variants
+// PT: latin1 for INFARMED HTML
+function fetchLatin1(url, timeoutMs) {
+  return new Promise(function(resolve, reject) {
+    var done = false;
+    var lib = url.startsWith('https') ? https : http;
+    var req = lib.get(url, { headers: { 'User-Agent': 'Mozilla/5.0 PharmaScout/1.0' } }, function(res) {
+      if (res.statusCode === 301 || res.statusCode === 302) {
+        if (!done) { done = true; fetchLatin1(res.headers.location, timeoutMs).then(resolve).catch(reject); }
+        return;
+      }
+      if (res.statusCode !== 200) {
+        if (!done) { done = true; reject(new Error('HTTP ' + res.statusCode)); }
+        return;
+      }
+      var chunks = [];
+      res.on('data', function(c) { chunks.push(c); });
+      res.on('end', function() {
+        if (!done) { done = true; resolve(Buffer.concat(chunks).toString('latin1')); }
+      });
+      res.on('error', function(e) { if (!done) { done = true; reject(e); } });
+    });
+    req.on('error', function(e) { if (!done) { done = true; reject(e); } });
+    req.setTimeout(timeoutMs || 10000, function() {
+      req.destroy();
+      if (!done) { done = true; reject(new Error('timeout')); }
+    });
+  });
+}
+
+// buildTerms: covers FR/ES/PT INN variants
 function buildTerms(s) {
   var t = [s];
   if (s.endsWith('ide') && s.length > 6) {
@@ -95,8 +89,11 @@ function matchesTerms(name, terms) {
 }
 
 function holderFromName(name) {
-  var m = name.match(/\b([A-Z][A-Z\s\-]{2,}(?:PHARMA|LABS?|MED|GENERICS?|TEVA|MYLAN|SANDOZ|RATIOPHARM|EG|BIOGARAN|ARROW)?)\b/i);
-  return m ? m[1].trim() : '';
+  var parts = name.split(/\s+/);
+  // Holder is typically the word(s) after the INN in the product name
+  // e.g. "FINASTERIDE ACCORD 5mg" -> "ACCORD"
+  if (parts.length >= 2) return parts[1];
+  return '';
 }
 
 function ptDCI(terms) {
@@ -105,44 +102,40 @@ function ptDCI(terms) {
   return cand.charAt(0).toUpperCase() + cand.slice(1);
 }
 
-// country fetchers
-
+// France: BDPM autocomplete API — fast, returns authorized+commercialized products
 async function fetchFrance(substance, terms) {
   var frDebug = {};
-  var now = Date.now();
-  if (!_frRows || now - _frTs > FR_TTL) {
-    var txt = await fetchTextNode(FR_URL, 25000);
-    _frRows = txt.split(/\r?\n/);
-    _frTs = now;
-    frDebug.rowsFetched = _frRows.length;
-    if (_frRows.length > 1) frDebug.sampleCols = _frRows[1].split('\t').slice(0, 9);
-  } else {
-    frDebug.rowsCached = _frRows.length;
-    if (_frRows.length > 1) frDebug.sampleCols = _frRows[1].split('\t').slice(0, 9);
+  try {
+    // The BDPM autocomplete API searches medicine names containing the term
+    // Returns [{value: "FINASTERIDE ACCORD 5mg ...", url: "/medicament/.../extrait"}, ...]
+    var url = 'https://base-donnees-publique.medicaments.gouv.fr/api/options_autocompilation' +
+      '?searchType=medicine&term=' + encodeURIComponent(substance) +
+      '&contains=' + encodeURIComponent(substance);
+    frDebug.url = url;
+    var txt = await fetchApiText(url, 8000);
+    var data = JSON.parse(txt);
+    frDebug.rawCount = data.length;
+    var products = [];
+    for (var i = 0; i < data.length; i++) {
+      var name = (data[i].value || '').trim();
+      if (!name || !matchesTerms(name, terms)) continue;
+      products.push({ name: name, holder: holderFromName(name), status: 'Autoris\u00e9' });
+      if (products.length >= 50) break;
+    }
+    frDebug.found = products.length;
+    return { products: products, debug: frDebug };
+  } catch(e) {
+    frDebug.error = e.message;
+    return { products: [], debug: frDebug };
   }
-
-  var products = [];
-  for (var i = 0; i < _frRows.length; i++) {
-    var line = _frRows[i].trim();
-    if (!line) continue;
-    var cols = line.split('\t');
-    if (cols.length < 8) continue;
-    if (cols[4] !== 'Autorisation active') continue;
-    if (cols[6].indexOf('Commercialis') !== 0) continue;
-    var name = cols[1] || '';
-    if (!matchesTerms(name, terms)) continue;
-    products.push({ name: name, holder: holderFromName(name), status: 'Autoris\u00e9' });
-    if (products.length >= 50) break;
-  }
-  frDebug.found = products.length;
-  return { products: products, debug: frDebug };
 }
 
+// Spain: CIMA REST API
 async function fetchSpain(substance, terms) {
   var spanishTerm = terms.find(function(t) { return t.endsWith('a'); }) || (substance + 'a');
   var url = 'https://cima.aemps.es/cima/rest/medicamentos?nombre=' +
     encodeURIComponent(spanishTerm) + '&pagina=1&tamanioPagina=100';
-  var txt = await fetchApiText(url, 15000);
+  var txt = await fetchApiText(url, 10000);
   var data = JSON.parse(txt);
   var items = data.resultados || [];
   var products = [];
@@ -157,12 +150,10 @@ async function fetchSpain(substance, terms) {
   return products;
 }
 
-// Belgium: SAM v2 REST API (no ZIP streaming needed - direct JSON/XML query)
+// Belgium: SAM v2 REST API — direct JSON/XML search, no ZIP
 async function fetchBelgium(substance, terms) {
   var beDebug = {};
   try {
-    // SAM v2 REST API - officialName does substring search
-    // Try base substance first, then the 'a'-suffix variant
     var queries = [substance];
     var aVar = terms.find(function(t) { return t !== substance && t.endsWith('a'); });
     if (aVar) queries.push(aVar);
@@ -178,14 +169,13 @@ async function fetchBelgium(substance, terms) {
 
       var txt;
       try {
-        txt = await fetchApiText(url, 15000);
+        txt = await fetchApiText(url, 10000);
       } catch(fe) {
         fetchErrors.push(queries[qi] + ':' + fe.message);
         continue;
       }
       beDebug['len' + qi] = txt.length;
-      // Always capture preview for debugging
-      beDebug['preview' + qi] = txt.substring(0, 600);
+      beDebug['preview' + qi] = txt.substring(0, 400);
 
       // Try JSON
       var jsonOk = false;
@@ -193,11 +183,8 @@ async function fetchBelgium(substance, terms) {
         var data = JSON.parse(txt);
         var items = Array.isArray(data) ? data :
           (data.ampElements || data.result || data.results || data.items || data.content || []);
-        if (typeof items === 'object' && !Array.isArray(items)) {
-          items = Object.values(items);
-        }
-        beDebug['jsonKeys' + qi] = Array.isArray(data) ? 'array:' + data.length :
-          Object.keys(data).join(',');
+        if (typeof items === 'object' && !Array.isArray(items)) items = Object.values(items);
+        beDebug['jsonKeys' + qi] = Array.isArray(data) ? 'array:' + data.length : Object.keys(data).join(',');
         jsonOk = true;
         for (var i = 0; i < (items || []).length; i++) {
           var item = items[i];
@@ -214,7 +201,7 @@ async function fetchBelgium(substance, terms) {
         beDebug['jsonErr' + qi] = jsonErr.message;
       }
 
-      // Try XML if JSON failed or found nothing
+      // Try XML if JSON failed or no results
       if (!jsonOk || products.length === 0) {
         var xmlNames = txt.match(/<OfficialName[^>]*>([^<]+)<\/OfficialName>/gi) || [];
         beDebug['xmlNames' + qi] = xmlNames.length;
@@ -236,12 +223,13 @@ async function fetchBelgium(substance, terms) {
   }
 }
 
+// Portugal: INFARMED HTML table
 async function fetchPortugal(substance, terms) {
   var dci = ptDCI(terms);
   var b64 = Buffer.from(dci).toString('base64');
   var url = 'http://app10.infarmed.pt/genericos/genericos_II/lista_genericos.php' +
     '?tabela=dispt&fonte=dci&escolha_dci=' + encodeURIComponent(b64);
-  var txt = await fetchTextNode(url, 15000);
+  var txt = await fetchLatin1(url, 10000);
   var products = [];
   var rows = txt.match(/<tr[^>]*>[\s\S]*?<\/tr>/gi) || [];
   for (var i = 0; i < rows.length; i++) {
