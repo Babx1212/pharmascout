@@ -9,12 +9,6 @@ var _frRows = null, _frTs = 0;
 const FR_TTL = 6 * 3600 * 1000;
 const FR_URL = 'https://base-donnees-publique.medicaments.gouv.fr/index.php/download/file/CIS_bdpm.txt';
 
-// Belgium SAM cache
-var _beVersion = null, _beVersionTs = 0;
-const BE_TTL = 6 * 3600 * 1000;
-const BE_BASE = 'https://www.vas.ehealth.fgov.be/websamcivics/samcivics/download/';
-const MAX_SAM_BYTES = 60 * 1024 * 1024; // 60 MB compressed limit (covers multiple ZIP files)
-
 // helpers
 function fetchTextNode(url, timeoutMs) {
   return new Promise(function(resolve, reject) {
@@ -38,6 +32,41 @@ function fetchTextNode(url, timeoutMs) {
     });
     req.on('error', function(e) { if (!done) { done = true; reject(e); } });
     req.setTimeout(timeoutMs || 20000, function() {
+      req.destroy();
+      if (!done) { done = true; reject(new Error('timeout')); }
+    });
+  });
+}
+
+// UTF-8 fetch for JSON/XML APIs (Belgium SAM, Spain CIMA)
+function fetchApiText(url, timeoutMs) {
+  return new Promise(function(resolve, reject) {
+    var done = false;
+    var lib = url.startsWith('https') ? https : http;
+    var opts = {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 PharmaScout/1.0',
+        'Accept': 'application/json, application/xml, text/xml, */*'
+      }
+    };
+    var req = lib.get(url, opts, function(res) {
+      if (res.statusCode === 301 || res.statusCode === 302) {
+        if (!done) { done = true; fetchApiText(res.headers.location, timeoutMs).then(resolve).catch(reject); }
+        return;
+      }
+      if (res.statusCode !== 200) {
+        if (!done) { done = true; reject(new Error('HTTP ' + res.statusCode + ' ' + url)); }
+        return;
+      }
+      var chunks = [];
+      res.on('data', function(c) { chunks.push(c); });
+      res.on('end', function() {
+        if (!done) { done = true; resolve(Buffer.concat(chunks).toString('utf8')); }
+      });
+      res.on('error', function(e) { if (!done) { done = true; reject(e); } });
+    });
+    req.on('error', function(e) { if (!done) { done = true; reject(e); } });
+    req.setTimeout(timeoutMs || 15000, function() {
       req.destroy();
       if (!done) { done = true; reject(new Error('timeout')); }
     });
@@ -76,169 +105,6 @@ function ptDCI(terms) {
   return cand.charAt(0).toUpperCase() + cand.slice(1);
 }
 
-// Belgium: stream ZIP-compressed SAM XML, handles multi-file ZIP, searches OfficialName
-function streamSearchSAM(url, terms) {
-  return new Promise(function(resolve) {
-    var products = [], textBuf = '', done = false, xmlStart = '';
-    var buf = Buffer.alloc(0), bytesIn = 0;
-    var inflate = null;
-    // ZIP state machine: SEEK=looking for header, SKIP=skipping known bytes, INFLATE=decompressing
-    var zipState = 'SEEK';
-    var skipLeft = 0;       // bytes left to skip in SKIP state
-    var inflateLeft = 0;    // compressed bytes left to feed inflate (0 = unknown/data-descriptor)
-    var filesChecked = [];  // debug: file names seen
-
-    function finish() {
-      if (!done) {
-        done = true;
-        if (inflate) { try { inflate.destroy(); } catch(e) {} }
-        resolve({ products: products, xmlStart: xmlStart, filesChecked: filesChecked });
-      }
-    }
-
-    function processText(text) {
-      if (done) return;
-      textBuf += text;
-      if (!xmlStart && textBuf.length >= 2000) xmlStart = textBuf.substring(0, 2000);
-      var bufL = textBuf.toLowerCase();
-      var pos = 0;
-      while (true) {
-        var idx = bufL.indexOf('officialname', pos);
-        if (idx === -1) break;
-        var lt = textBuf.lastIndexOf('<', idx);
-        if (lt === -1 || lt < idx - 60) { pos = idx + 1; continue; }
-        if (textBuf[lt + 1] === '/') { pos = idx + 1; continue; }
-        var gt = textBuf.indexOf('>', idx);
-        if (gt === -1) break;
-        var cStart = gt + 1;
-        var nLt = textBuf.indexOf('<', cStart);
-        if (nLt === -1) break;
-        var name = textBuf.substring(cStart, nLt).trim();
-        pos = nLt;
-        if (!name || !matchesTerms(name, terms)) continue;
-        var ctx = textBuf.substring(lt, Math.min(textBuf.length, lt + 5000));
-        var mahM = ctx.match(/<[^>]{0,40}[Nn]ame[^>]{0,40}>([A-Za-z][^<]{2,70})<\/[^>]{0,40}[Nn]ame>/);
-        products.push({ name: name, holder: mahM ? mahM[1].trim() : '', status: 'Autoris\u00e9' });
-        if (products.length >= 30) { finish(); return; }
-      }
-      if (textBuf.length > 15000) textBuf = textBuf.substring(textBuf.length - 5000);
-    }
-
-    function startInflate(wanted, compressedSize) {
-      inflate = zlib.createInflateRaw();
-      inflateLeft = compressedSize; // 0 = data-descriptor (unknown size)
-      if (wanted) {
-        inflate.on('data', function(c) { processText(c.toString('utf8')); });
-      } else {
-        inflate.on('data', function() {}); // discard
-      }
-      inflate.on('end', function() {
-        inflate = null;
-        zipState = 'SEEK';
-        // Continue processing buffered bytes
-        setImmediate(processBuffer);
-      });
-      inflate.on('error', function() {
-        inflate = null;
-        zipState = 'SEEK';
-        setImmediate(processBuffer);
-      });
-      zipState = 'INFLATE';
-    }
-
-    function processBuffer() {
-      if (done) return;
-      // Feed inflate if active
-      if (zipState === 'INFLATE' && inflate) {
-        if (inflateLeft > 0) {
-          // Known size: send exactly inflateLeft bytes
-          var toSend = Math.min(buf.length, inflateLeft);
-          if (toSend === 0) return;
-          var chunk = buf.slice(0, toSend);
-          buf = buf.slice(toSend);
-          inflateLeft -= toSend;
-          inflate.write(chunk);
-          if (inflateLeft === 0) inflate.end(); // signal end-of-stream
-        } else {
-          // Unknown size (data descriptor): feed all, inflate fires 'end' naturally
-          var all = buf;
-          buf = Buffer.alloc(0);
-          inflate.write(all);
-        }
-        return;
-      }
-
-      // State machine loop
-      while (buf.length > 0 && !done && zipState !== 'INFLATE') {
-        if (zipState === 'SKIP') {
-          var skip = Math.min(buf.length, skipLeft);
-          buf = buf.slice(skip);
-          skipLeft -= skip;
-          if (skipLeft === 0) zipState = 'SEEK';
-
-        } else { // SEEK
-          if (buf.length < 4) return;
-          // Must start with PK\x03\x04
-          if (buf[0] === 0x50 && buf[1] === 0x4B && buf[2] === 0x03 && buf[3] === 0x04) {
-            if (buf.length < 30) return;
-            var bitFlag      = buf.readUInt16LE(6);
-            var compSize     = buf.readUInt32LE(18);
-            var fileNameLen  = buf.readUInt16LE(26);
-            var extraLen     = buf.readUInt16LE(28);
-            var hdrSize      = 30 + fileNameLen + extraLen;
-            if (buf.length < hdrSize) return;
-            var fileName = buf.slice(30, 30 + fileNameLen).toString('utf8');
-            var hasDD = (bitFlag & 0x08) !== 0;
-            filesChecked.push(fileName);
-            buf = buf.slice(hdrSize);
-            // AMP files have product name data; skip ChapterIV/Reimbursement
-            var wanted = !fileName.match(/chapteriv|chapter_iv|reimburs|terugbetal/i);
-            if (!hasDD && compSize > 0) {
-              startInflate(wanted, compSize);
-            } else if (!wanted && !hasDD && compSize === 0) {
-              // Empty file, nothing to do
-            } else {
-              // Data descriptor or zero size: inflate to find stream end
-              startInflate(wanted, 0);
-            }
-          } else {
-            // Scan forward for next PK\x03\x04
-            var pk = -1;
-            for (var i = 1; i + 3 < buf.length; i++) {
-              if (buf[i] === 0x50 && buf[i+1] === 0x4B && buf[i+2] === 0x03 && buf[i+3] === 0x04) {
-                pk = i; break;
-              }
-            }
-            if (pk === -1) { buf = buf.length > 3 ? buf.slice(buf.length - 3) : buf; return; }
-            buf = buf.slice(pk);
-          }
-        }
-      }
-    }
-
-    var lib = url.startsWith('https') ? https : http;
-    var req = lib.get(url, { headers: { 'User-Agent': 'Mozilla/5.0 PharmaScout/1.0' } }, function(res) {
-      if (res.statusCode === 301 || res.statusCode === 302) {
-        streamSearchSAM(res.headers.location, terms).then(resolve); return;
-      }
-      if (res.statusCode !== 200) { finish(); return; }
-      res.on('data', function(chunk) {
-        bytesIn += chunk.length;
-        if (done) return;
-        buf = Buffer.concat([buf, chunk]);
-        processBuffer();
-        if (bytesIn > MAX_SAM_BYTES) { finish(); }
-      });
-      res.on('end', function() {
-        if (inflate && !done) inflate.end(); else finish();
-      });
-      res.on('error', finish);
-    });
-    req.on('error', finish);
-    req.setTimeout(25000, function() { req.destroy(); finish(); });
-  });
-}
-
 // country fetchers
 
 async function fetchFrance(substance, terms) {
@@ -249,7 +115,6 @@ async function fetchFrance(substance, terms) {
     _frRows = txt.split(/\r?\n/);
     _frTs = now;
     frDebug.rowsFetched = _frRows.length;
-    // Sample first data row for column verification
     if (_frRows.length > 1) frDebug.sampleCols = _frRows[1].split('\t').slice(0, 9);
   } else {
     frDebug.rowsCached = _frRows.length;
@@ -277,7 +142,7 @@ async function fetchSpain(substance, terms) {
   var spanishTerm = terms.find(function(t) { return t.endsWith('a'); }) || (substance + 'a');
   var url = 'https://cima.aemps.es/cima/rest/medicamentos?nombre=' +
     encodeURIComponent(spanishTerm) + '&pagina=1&tamanioPagina=100';
-  var txt = await fetchTextNode(url, 15000);
+  var txt = await fetchApiText(url, 15000);
   var data = JSON.parse(txt);
   var items = data.resultados || [];
   var products = [];
@@ -292,27 +157,81 @@ async function fetchSpain(substance, terms) {
   return products;
 }
 
+// Belgium: SAM v2 REST API (no ZIP streaming needed - direct JSON/XML query)
 async function fetchBelgium(substance, terms) {
   var beDebug = {};
-  var now = Date.now();
   try {
-    if (!_beVersion || now - _beVersionTs > BE_TTL) {
-      var verTxt = await fetchTextNode(BE_BASE + 'samv2-full-getLastVersion?xsd=5', 8000);
-      _beVersion = verTxt.trim().replace(/"/g, '').replace(/[^0-9]/g, '');
-      _beVersionTs = now;
-      beDebug.versionFetched = true;
+    // SAM v2 REST API - officialName does substring search
+    // Try base substance first, then the 'a'-suffix variant
+    var queries = [substance];
+    var aVar = terms.find(function(t) { return t !== substance && t.endsWith('a'); });
+    if (aVar) queries.push(aVar);
+
+    var products = [];
+    var fetchErrors = [];
+
+    for (var qi = 0; qi < queries.length && products.length === 0; qi++) {
+      var url = 'https://www.vas.ehealth.fgov.be/websamcivics/samcivics/rest/samv2/amp' +
+        '?officialName=' + encodeURIComponent(queries[qi]) +
+        '&language=fr&status=AUTHORIZED&pageSize=100';
+      beDebug['url' + qi] = url;
+
+      var txt;
+      try {
+        txt = await fetchApiText(url, 15000);
+      } catch(fe) {
+        fetchErrors.push(queries[qi] + ':' + fe.message);
+        continue;
+      }
+      beDebug['len' + qi] = txt.length;
+      // Always capture preview for debugging
+      beDebug['preview' + qi] = txt.substring(0, 600);
+
+      // Try JSON
+      var jsonOk = false;
+      try {
+        var data = JSON.parse(txt);
+        var items = Array.isArray(data) ? data :
+          (data.ampElements || data.result || data.results || data.items || data.content || []);
+        if (typeof items === 'object' && !Array.isArray(items)) {
+          items = Object.values(items);
+        }
+        beDebug['jsonKeys' + qi] = Array.isArray(data) ? 'array:' + data.length :
+          Object.keys(data).join(',');
+        jsonOk = true;
+        for (var i = 0; i < (items || []).length; i++) {
+          var item = items[i];
+          var name = item.officialName || item.OfficialName || item.name || item.naam || item.nom || '';
+          if (!name || !matchesTerms(name, terms)) continue;
+          var holder = '';
+          if (item.company) holder = item.company.name || item.company.naam || item.company.nom || '';
+          if (!holder && item.mah) holder = item.mah;
+          if (!holder && item.holder) holder = item.holder;
+          products.push({ name: name, holder: holder, status: 'Autoris\u00e9' });
+          if (products.length >= 50) break;
+        }
+      } catch(jsonErr) {
+        beDebug['jsonErr' + qi] = jsonErr.message;
+      }
+
+      // Try XML if JSON failed or found nothing
+      if (!jsonOk || products.length === 0) {
+        var xmlNames = txt.match(/<OfficialName[^>]*>([^<]+)<\/OfficialName>/gi) || [];
+        beDebug['xmlNames' + qi] = xmlNames.length;
+        for (var j = 0; j < xmlNames.length; j++) {
+          var nm = xmlNames[j].replace(/<[^>]+>/g, '').trim();
+          if (!nm || !matchesTerms(nm, terms)) continue;
+          products.push({ name: nm, holder: '', status: 'Autoris\u00e9' });
+          if (products.length >= 50) break;
+        }
+      }
     }
-    beDebug.version = _beVersion;
-    if (!_beVersion) throw new Error('empty version');
-    var ampUrl = BE_BASE + 'samv2-download?type=AMP&xsd=5&version=' + _beVersion;
-    beDebug.ampUrl = ampUrl;
-    var result = await streamSearchSAM(ampUrl, terms);
-    beDebug.xmlStart = result.xmlStart ? result.xmlStart.substring(0, 300) : 'none';
-    beDebug.filesChecked = result.filesChecked || [];
-    return { products: result.products, debug: beDebug };
+
+    if (fetchErrors.length) beDebug.fetchErrors = fetchErrors.join('; ');
+    beDebug.found = products.length;
+    return { products: products, debug: beDebug };
   } catch(e) {
     beDebug.error = e.message;
-    _beVersion = null;
     return { products: [], debug: beDebug };
   }
 }
