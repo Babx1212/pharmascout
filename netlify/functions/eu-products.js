@@ -1,4 +1,7 @@
 'use strict';
+const zlib = require('zlib');
+const https = require('https');
+const http = require('http');
 const HEADERS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' };
 
 // France BDPM cache
@@ -10,28 +13,34 @@ const FR_URL = 'https://base-donnees-publique.medicaments.gouv.fr/index.php/down
 var _beVersion = null, _beVersionTs = 0;
 const BE_TTL = 6 * 3600 * 1000;
 const BE_BASE = 'https://www.vas.ehealth.fgov.be/websamcivics/samcivics/download/';
-const MAX_SAM_BYTES = 7 * 1024 * 1024;
+const MAX_SAM_BYTES = 20 * 1024 * 1024; // 20 MB compressed limit
 
 // helpers
-function fetchText(url, timeoutMs) {
+function fetchTextNode(url, timeoutMs) {
   return new Promise(function(resolve, reject) {
     var done = false;
-    var t = setTimeout(function() {
-      if (!done) { done = true; reject(new Error('timeout:' + url.substring(0, 60))); }
-    }, timeoutMs || 12000);
-    fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 PharmaScout/1.0' } })
-      .then(function(r) {
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        return r.text();
-      })
-      .then(function(txt) {
-        clearTimeout(t);
-        if (!done) { done = true; resolve(txt); }
-      })
-      .catch(function(e) {
-        clearTimeout(t);
-        if (!done) { done = true; reject(e); }
+    var lib = url.startsWith('https') ? https : http;
+    var req = lib.get(url, { headers: { 'User-Agent': 'Mozilla/5.0 PharmaScout/1.0' } }, function(res) {
+      if (res.statusCode === 301 || res.statusCode === 302) {
+        if (!done) { done = true; fetchTextNode(res.headers.location, timeoutMs).then(resolve).catch(reject); }
+        return;
+      }
+      if (res.statusCode !== 200) {
+        if (!done) { done = true; reject(new Error('HTTP ' + res.statusCode)); }
+        return;
+      }
+      var chunks = [];
+      res.on('data', function(c) { chunks.push(c); });
+      res.on('end', function() {
+        if (!done) { done = true; resolve(Buffer.concat(chunks).toString('latin1')); }
       });
+      res.on('error', function(e) { if (!done) { done = true; reject(e); } });
+    });
+    req.on('error', function(e) { if (!done) { done = true; reject(e); } });
+    req.setTimeout(timeoutMs || 20000, function() {
+      req.destroy();
+      if (!done) { done = true; reject(new Error('timeout')); }
+    });
   });
 }
 
@@ -61,99 +70,119 @@ function holderFromName(name) {
   return m ? m[1].trim() : '';
 }
 
-// Portugal DCI
 function ptDCI(terms) {
   var cand = terms.find(function(t) { return t.endsWith('a'); });
   if (!cand) cand = terms[0] + 'a';
   return cand.charAt(0).toUpperCase() + cand.slice(1);
 }
 
-// Belgium SAM streaming XML search
-// Searches for OfficialName elements (handles any namespace prefix)
+// Belgium: stream ZIP-compressed SAM XML, search OfficialName elements
 function streamSearchSAM(url, terms) {
   return new Promise(function(resolve) {
-    var products = [], buf = '', bytesRead = 0, done = false, xmlStart = '';
+    var products = [], textBuf = '', done = false, xmlStart = '';
+    var rawBuf = Buffer.alloc(0), headerParsed = false;
+    var inflate = null, bytesIn = 0;
 
     function finish() {
-      if (!done) { done = true; resolve({ products: products, xmlStart: xmlStart }); }
+      if (!done) {
+        done = true;
+        if (inflate) { try { inflate.destroy(); } catch(e) {} }
+        resolve({ products: products, xmlStart: xmlStart });
+      }
     }
 
-    fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 PharmaScout/1.0' } })
-      .then(function(r) {
-        if (!r.ok) { finish(); return; }
-        var reader = r.body.getReader();
-        var dec = new TextDecoder('utf-8');
+    function processText(text) {
+      if (done) return;
+      textBuf += text;
+      if (!xmlStart && textBuf.length >= 2000) xmlStart = textBuf.substring(0, 2000);
 
-        function pump() {
-          if (done) return;
-          reader.read().then(function(chunk) {
-            if (chunk.done || done) { finish(); return; }
-            bytesRead += chunk.value.length;
-            buf += dec.decode(chunk.value, { stream: true });
+      var bufL = textBuf.toLowerCase();
+      var pos = 0;
+      while (true) {
+        var idx = bufL.indexOf('officialname', pos);
+        if (idx === -1) break;
+        var lt = textBuf.lastIndexOf('<', idx);
+        if (lt === -1 || lt < idx - 60) { pos = idx + 1; continue; }
+        if (textBuf[lt + 1] === '/') { pos = idx + 1; continue; }
+        var gt = textBuf.indexOf('>', idx);
+        if (gt === -1) break;
+        var cStart = gt + 1;
+        var nLt = textBuf.indexOf('<', cStart);
+        if (nLt === -1) break;
+        var name = textBuf.substring(cStart, nLt).trim();
+        pos = nLt;
+        if (!name || !matchesTerms(name, terms)) continue;
+        var ctx = textBuf.substring(lt, Math.min(textBuf.length, lt + 5000));
+        var mahM = ctx.match(/<[^>]{0,40}[Nn]ame[^>]{0,40}>([A-Za-z][^<]{2,70})<\/[^>]{0,40}[Nn]ame>/);
+        products.push({ name: name, holder: mahM ? mahM[1].trim() : '', status: 'Autoris\u00e9' });
+        if (products.length >= 30) { finish(); return; }
+      }
+      if (textBuf.length > 15000) textBuf = textBuf.substring(textBuf.length - 5000);
+    }
 
-            // Capture first 2000 chars for debug
-            if (!xmlStart && buf.length >= 2000) xmlStart = buf.substring(0, 2000);
-
-            // Search for OfficialName elements (case-insensitive)
-            var bufL = buf.toLowerCase();
-            var pos = 0;
-            while (true) {
-              var idx = bufL.indexOf('officialname', pos);
-              if (idx === -1) break;
-
-              // Walk back to find the '<' of the opening tag
-              var lt = buf.lastIndexOf('<', idx);
-              if (lt === -1 || lt < idx - 60) { pos = idx + 1; continue; }
-
-              // Skip if this is a closing tag </...OfficialName>
-              if (buf[lt + 1] === '/') { pos = idx + 1; continue; }
-
-              // Find end '>' of the opening tag
-              var gt = buf.indexOf('>', idx);
-              if (gt === -1) break; // tag not yet complete — wait for more data
-
-              // Extract content between '>' and next '<'
-              var contentStart = gt + 1;
-              var nextLt = buf.indexOf('<', contentStart);
-              if (nextLt === -1) break; // content not yet complete
-
-              var name = buf.substring(contentStart, nextLt).trim();
-              pos = nextLt;
-
-              if (!name || !matchesTerms(name, terms)) continue;
-
-              // Extract MAH: look for a <Name> element in next 5000 chars
-              var ctx = buf.substring(lt, Math.min(buf.length, lt + 5000));
-              var mahM = ctx.match(/<[^>]{0,40}[Nn]ame[^>]{0,40}>([A-Za-z][^<]{2,70})<\/[^>]{0,40}[Nn]ame>/);
-              var holder = mahM ? mahM[1].trim() : '';
-
-              products.push({ name: name, holder: holder, status: 'Autoris\u00e9' });
-              if (products.length >= 30) { finish(); return; }
-            }
-
-            // Keep 5000 chars of tail to not miss split elements
-            if (buf.length > 15000) {
-              buf = buf.substring(buf.length - 5000);
-            }
-
-            if (bytesRead > MAX_SAM_BYTES) { finish(); return; }
-            pump();
-          }).catch(finish);
+    function handleChunk(chunk) {
+      if (done) return;
+      if (!headerParsed) {
+        rawBuf = Buffer.concat([rawBuf, chunk]);
+        if (rawBuf.length < 30) return;
+        // Check ZIP signature: PK\x03\x04
+        if (rawBuf[0] === 0x50 && rawBuf[1] === 0x4B && rawBuf[2] === 0x03 && rawBuf[3] === 0x04) {
+          var fileNameLen = rawBuf.readUInt16LE(26);
+          var extraLen = rawBuf.readUInt16LE(28);
+          var dataStart = 30 + fileNameLen + extraLen;
+          if (rawBuf.length < dataStart) return; // need more bytes
+          inflate = zlib.createInflateRaw();
+          inflate.on('data', function(c) { processText(c.toString('utf8')); });
+          inflate.on('end', finish);
+          inflate.on('error', finish);
+          headerParsed = true;
+          inflate.write(rawBuf.slice(dataStart));
+        } else {
+          // Plain XML (not ZIP)
+          headerParsed = true;
+          processText(rawBuf.toString('utf8'));
         }
-        pump();
-      })
-      .catch(finish);
+        rawBuf = Buffer.alloc(0);
+        return;
+      }
+      if (inflate) inflate.write(chunk);
+    }
+
+    var lib = url.startsWith('https') ? https : http;
+    var req = lib.get(url, { headers: { 'User-Agent': 'Mozilla/5.0 PharmaScout/1.0' } }, function(res) {
+      if (res.statusCode === 301 || res.statusCode === 302) {
+        streamSearchSAM(res.headers.location, terms).then(resolve);
+        return;
+      }
+      if (res.statusCode !== 200) { finish(); return; }
+      res.on('data', function(chunk) {
+        bytesIn += chunk.length;
+        if (done) return;
+        handleChunk(chunk);
+        if (bytesIn > MAX_SAM_BYTES) { finish(); }
+      });
+      res.on('end', function() { if (inflate && !done) inflate.end(); else finish(); });
+      res.on('error', finish);
+    });
+    req.on('error', finish);
+    req.setTimeout(22000, function() { req.destroy(); finish(); });
   });
 }
 
 // country fetchers
 
 async function fetchFrance(substance, terms) {
+  var frDebug = {};
   var now = Date.now();
   if (!_frRows || now - _frTs > FR_TTL) {
-    var txt = await fetchText(FR_URL, 25000);
+    var txt = await fetchTextNode(FR_URL, 25000);
     _frRows = txt.split(/\r?\n/);
     _frTs = now;
+    frDebug.rowsFetched = _frRows.length;
+    // Sample first data row for column verification
+    if (_frRows.length > 1) frDebug.sampleCols = _frRows[1].split('\t').slice(0, 9);
+  } else {
+    frDebug.rowsCached = _frRows.length;
   }
 
   var products = [];
@@ -169,15 +198,15 @@ async function fetchFrance(substance, terms) {
     products.push({ name: name, holder: holderFromName(name), status: 'Autoris\u00e9' });
     if (products.length >= 50) break;
   }
-  return products;
+  frDebug.found = products.length;
+  return { products: products, debug: frDebug };
 }
 
 async function fetchSpain(substance, terms) {
-  // CIMA needs the Spanish INN name (ends in 'a' for most substances)
   var spanishTerm = terms.find(function(t) { return t.endsWith('a'); }) || (substance + 'a');
   var url = 'https://cima.aemps.es/cima/rest/medicamentos?nombre=' +
     encodeURIComponent(spanishTerm) + '&pagina=1&tamanioPagina=100';
-  var txt = await fetchText(url, 15000);
+  var txt = await fetchTextNode(url, 15000);
   var data = JSON.parse(txt);
   var items = data.resultados || [];
   var products = [];
@@ -195,27 +224,20 @@ async function fetchSpain(substance, terms) {
 async function fetchBelgium(substance, terms) {
   var beDebug = {};
   var now = Date.now();
-
   try {
-    // Step 1: get latest version number for XSD 5
     if (!_beVersion || now - _beVersionTs > BE_TTL) {
-      var verTxt = await fetchText(BE_BASE + 'samv2-full-getLastVersion?xsd=5', 8000);
+      var verTxt = await fetchTextNode(BE_BASE + 'samv2-full-getLastVersion?xsd=5', 8000);
       _beVersion = verTxt.trim().replace(/"/g, '').replace(/[^0-9]/g, '');
       _beVersionTs = now;
       beDebug.versionFetched = true;
     }
     beDebug.version = _beVersion;
-
     if (!_beVersion) throw new Error('empty version');
-
-    // Step 2: stream the SAM XML and search for OfficialName elements
     var ampUrl = BE_BASE + 'samv2-download?type=FULL&xsd=5&version=' + _beVersion;
     beDebug.ampUrl = ampUrl;
-
     var result = await streamSearchSAM(ampUrl, terms);
-    beDebug.xmlStart = result.xmlStart ? result.xmlStart.substring(0, 800) : 'none';
+    beDebug.xmlStart = result.xmlStart ? result.xmlStart.substring(0, 500) : 'none';
     return { products: result.products, debug: beDebug };
-
   } catch(e) {
     beDebug.error = e.message;
     _beVersion = null;
@@ -225,10 +247,10 @@ async function fetchBelgium(substance, terms) {
 
 async function fetchPortugal(substance, terms) {
   var dci = ptDCI(terms);
-  var b64 = btoa(dci);
+  var b64 = Buffer.from(dci).toString('base64');
   var url = 'http://app10.infarmed.pt/genericos/genericos_II/lista_genericos.php' +
     '?tabela=dispt&fonte=dci&escolha_dci=' + encodeURIComponent(b64);
-  var txt = await fetchText(url, 15000);
+  var txt = await fetchTextNode(url, 15000);
   var products = [];
   var rows = txt.match(/<tr[^>]*>[\s\S]*?<\/tr>/gi) || [];
   for (var i = 0; i < rows.length; i++) {
