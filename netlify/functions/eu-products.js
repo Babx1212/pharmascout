@@ -183,6 +183,7 @@ async function fetchFrance(substance, terms) {
     if (_frRows.length > 1) frDebug.sampleCols = _frRows[1].split('\t').slice(0, 9);
   } else {
     frDebug.rowsCached = _frRows.length;
+    if (_frRows.length > 1) frDebug.sampleCols = _frRows[1].split('\t').slice(0, 9);
   }
 
   var products = [];
@@ -192,7 +193,7 @@ async function fetchFrance(substance, terms) {
     var cols = line.split('\t');
     if (cols.length < 8) continue;
     if (cols[4] !== 'Autorisation active') continue;
-    if (cols[7].indexOf('Commercialis') !== 0) continue;
+    if (cols[6].indexOf('Commercialis') !== 0) continue;
     var name = cols[1] || '';
     if (!matchesTerms(name, terms)) continue;
     products.push({ name: name, holder: holderFromName(name), status: 'Autoris\u00e9' });
@@ -233,7 +234,7 @@ async function fetchBelgium(substance, terms) {
     }
     beDebug.version = _beVersion;
     if (!_beVersion) throw new Error('empty version');
-    var ampUrl = BE_BASE + 'samv2-download?type=FULL&xsd=5&version=' + _beVersion;
+    var ampUrl = BE_BASE + 'samv2-download?type=AMP&xsd=5&version=' + _beVersion;
     beDebug.ampUrl = ampUrl;
     var result = await streamSearchSAM(ampUrl, terms);
     beDebug.xmlStart = result.xmlStart ? result.xmlStart.substring(0, 500) : 'none';
