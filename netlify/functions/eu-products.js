@@ -4,7 +4,7 @@ const http = require('http');
 const zlib = require('zlib');
 const HEADERS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' };
 
-// UTF-8 fetch
+// UTF-8 fetch for all JSON/HTML APIs
 function fetchApiText(url, timeoutMs, extraHeaders) {
   return new Promise(function(resolve, reject) {
     var done = false;
@@ -41,7 +41,7 @@ function fetchApiText(url, timeoutMs, extraHeaders) {
   });
 }
 
-// latin1 fetch (PT)
+// latin1 fetch (PT - INFARMED)
 function fetchLatin1(url, timeoutMs) {
   return new Promise(function(resolve, reject) {
     var done = false;
@@ -145,14 +145,10 @@ async function fetchSpain(substance, terms) {
   return products;
 }
 
-// ───────── BELGIUM ─────────
-// Strategy 1: SAM REST API (several URL variants)
-// Strategy 2: CBIP/BCFI HTML scraping
-// Strategy 3: Stream SAM ZIP and decompress AMP data in Node.js
+// ─────────────────────────── BELGIUM ───────────────────────────
 
 function parseSamXml(xml, terms) {
   var products = [];
-  // extract <OfficialName> elements
   var re = /<OfficialName[^>]*>([\s\S]*?)<\/OfficialName>/gi;
   var m;
   while ((m = re.exec(xml)) !== null) {
@@ -173,7 +169,7 @@ function parseSamJson(txt, terms, dbg, pfx) {
       (data.ampElements || data.result || data.results ||
        data.items || data.content || data.data || []);
     if (typeof items === 'object' && !Array.isArray(items)) items = Object.values(items);
-    dbg[pfx + 'jsonKeys'] = Array.isArray(data) ? 'array:' + data.length : Object.keys(data).slice(0,8).join(',');
+    dbg[pfx + 'keys'] = Array.isArray(data) ? 'array:' + data.length : Object.keys(data).slice(0, 8).join(',');
     for (var i = 0; i < (items || []).length; i++) {
       var item = items[i];
       var name = item.officialName || item.OfficialName || item.name || item.naam || item.nom || '';
@@ -186,170 +182,230 @@ function parseSamJson(txt, terms, dbg, pfx) {
       if (products.length >= 50) break;
     }
   } catch(e) {
-    dbg[pfx + 'jsonErr'] = e.message;
+    dbg[pfx + 'err'] = e.message;
   }
   return products;
 }
 
-// Stream SAM ZIP and extract product names via inflateRaw
-function streamSamZip(substance, terms, dbg, timeoutMs) {
+// Fetch current SAM version
+async function getSamVersion(dbg) {
+  try {
+    var txt = await fetchApiText(
+      'https://www.vas.ehealth.fgov.be/websamcivics/samcivics/download/samv2-full-getLastVersion?xsd=6',
+      6000
+    );
+    dbg.samVersionRaw = txt.substring(0, 60);
+    var m = txt.match(/\d+/);
+    if (m) return m[0];
+  } catch(e) {
+    dbg.samVersionErr = e.message;
+  }
+  return '11839'; // last known fallback
+}
+
+// Stream SAM ZIP with proper compressedSize tracking
+// Fixed from v10: now tracks compressedLeft per-entry to avoid feeding
+// extra bytes (next file header) to the inflater.
+function streamSamZip(substance, terms, dbg, version, timeoutMs) {
   return new Promise(function(resolve) {
-    // Try AMP-type download first, fallback to FULL is too large
-    // Version 11839 was last known; try without version too (will redirect/fail gracefully)
-    var zipUrls = [
-      'https://www.vas.ehealth.fgov.be/websamcivics/samcivics/download/samv2-download?type=AMP&xsd=6',
-      'https://www.vas.ehealth.fgov.be/websamcivics/samcivics/download/samv2-download?type=VMP&xsd=6',
-    ];
-    var urlIdx = 0;
+    var products = [];
+    var foundNames = {};
+    var zipUrl = 'https://www.vas.ehealth.fgov.be/websamcivics/samcivics/download/samv2-download?type=AMP&xsd=6&version=' + version;
+    dbg.zipUrl = zipUrl;
 
-    function tryUrl(url) {
-      dbg['zipUrl' + urlIdx] = url;
-      var products = [];
-      var done = false;
-      var bytesSeen = 0;
-      var buf = Buffer.alloc(0);
-      var state = 'header'; // 'header' | 'inflating'
-      var inflater = null;
-      var fileCount = 0;
-      var xmlBuf = '';
-      var foundNames = {};
+    var done = false;
+    var bytesSeen = 0;
+    var buf = Buffer.alloc(0);
+    var fileCount = 0;
+    var xmlBuf = '';
 
-      function finish(reason) {
-        if (done) return;
-        done = true;
-        dbg['zipBytes' + urlIdx] = bytesSeen;
-        dbg['zipFiles' + urlIdx] = fileCount;
-        dbg['zipEnd' + urlIdx] = reason;
-        try { req.destroy(); } catch(e) {}
-        resolve(products);
-      }
+    // State machine
+    var mode = 'header'; // 'header' | 'data'
+    var compressedLeft = 0; // bytes of compressed data still to feed to inflater
+    var inflater = null;
 
-      var timer = setTimeout(function() { finish('timeout'); }, timeoutMs);
-
-      function tryNextFile() {
-        while (true) {
-          if (buf.length < 4) return;
-          var sig = buf.readUInt32LE(0);
-
-          if (sig === 0x02014b50 || sig === 0x06054b50) {
-            clearTimeout(timer); finish('central-dir'); return;
-          }
-          if (sig === 0x08074b50) {
-            // data descriptor: 4(sig)+4(crc)+4(comp)+4(uncomp) = 16 bytes
-            if (buf.length < 16) return;
-            buf = buf.slice(16);
-            continue;
-          }
-          if (sig !== 0x04034b50) {
-            // scan for next local file header
-            var found = -1;
-            for (var i = 1; i <= buf.length - 4; i++) {
-              if (buf[i] === 0x50 && buf[i+1] === 0x4b && buf[i+2] === 0x03 && buf[i+3] === 0x04) {
-                found = i; break;
-              }
-            }
-            if (found === -1) { buf = buf.slice(Math.max(0, buf.length - 3)); return; }
-            buf = buf.slice(found);
-            continue;
-          }
-          if (buf.length < 30) return;
-          var method = buf.readUInt16LE(8);
-          var fnLen = buf.readUInt16LE(26);
-          var extraLen = buf.readUInt16LE(28);
-          var hdrSize = 30 + fnLen + extraLen;
-          if (buf.length < hdrSize) return;
-          var fname = buf.slice(30, 30 + fnLen).toString('utf8');
-          fileCount++;
-          dbg['zipF' + fileCount] = fname;
-          buf = buf.slice(hdrSize);
-
-          if (method === 8) {
-            state = 'inflating';
-            xmlBuf = '';
-            inflater = zlib.createInflateRaw();
-            inflater.on('data', function(chunk) {
-              xmlBuf += chunk.toString('utf8');
-              // Search for OfficialName
-              var re = /<OfficialName[^>]*>([\s\S]*?)<\/OfficialName>/gi;
-              var mm;
-              while ((mm = re.exec(xmlBuf)) !== null) {
-                var nm = mm[1].replace(/<[^>]+>/g, '').trim();
-                if (nm && matchesTerms(nm, terms) && !foundNames[nm]) {
-                  foundNames[nm] = true;
-                  products.push({ name: nm, holder: '', status: 'Autoris\u00e9' });
-                }
-              }
-              // Trim to avoid OOM
-              if (xmlBuf.length > 200000) xmlBuf = xmlBuf.slice(-10000);
-            });
-            inflater.on('end', function() {
-              state = 'header';
-              inflater = null;
-              tryNextFile();
-            });
-            inflater.on('error', function(e) {
-              dbg['zipF' + fileCount + 'Err'] = e.message;
-              state = 'header';
-              inflater = null;
-              // Scan buf for next local file header
-              tryNextFile();
-            });
-            // Feed current buf to inflater
-            if (buf.length > 0) {
-              var toFeed = buf;
-              buf = Buffer.alloc(0);
-              inflater.write(toFeed);
-            }
-            return; // wait for more data via res.on('data')
-          } else {
-            // stored or unknown — skip (can't determine size without central dir)
-            // Just move on and hope to find next signature
-            state = 'header';
-          }
-        }
-      }
-
-      var req = https.get(url, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 PharmaScout/1.0',
-          'Accept': '*/*'
-        }
-      }, function(res) {
-        dbg['zipStatus' + urlIdx] = res.statusCode;
-        if (res.statusCode !== 200) {
-          clearTimeout(timer);
-          urlIdx++;
-          if (urlIdx < zipUrls.length) {
-            tryUrl(zipUrls[urlIdx]);
-          } else {
-            resolve(products);
-          }
-          return;
-        }
-        res.on('data', function(chunk) {
-          if (done) return;
-          bytesSeen += chunk.length;
-          if (state === 'header') {
-            buf = Buffer.concat([buf, chunk]);
-            tryNextFile();
-          } else if (state === 'inflating' && inflater) {
-            inflater.write(chunk);
-          }
-        });
-        res.on('end', function() { clearTimeout(timer); finish('stream-end'); });
-        res.on('error', function(e) { clearTimeout(timer); dbg['zipResErr' + urlIdx] = e.message; finish('res-error'); });
-      });
-      req.on('error', function(e) {
-        clearTimeout(timer);
-        dbg['zipReqErr' + urlIdx] = e.message;
-        urlIdx++;
-        if (urlIdx < zipUrls.length) tryUrl(zipUrls[urlIdx]);
-        else resolve(products);
-      });
-      req.setTimeout(timeoutMs + 2000, function() { req.destroy(); finish('req-timeout'); });
+    function finish(reason) {
+      if (done) return;
+      done = true;
+      dbg.zipBytes = bytesSeen;
+      dbg.zipFiles = fileCount;
+      dbg.zipEnd = reason;
+      dbg.zipHits = products.length;
+      try { req.destroy(); } catch(e2) {}
+      if (inflater) { try { inflater.destroy(); } catch(e2) {} inflater = null; }
+      resolve(products);
     }
 
-    tryUrl(zipUrls[urlIdx]);
+    var timer = setTimeout(function() { finish('timeout'); }, timeoutMs);
+
+    // Feed buffered bytes to inflater, respecting compressedLeft
+    function processDataBuf() {
+      if (mode !== 'data' || !inflater || done) return;
+      if (buf.length === 0) return;
+
+      var avail = buf.length;
+      if (avail <= compressedLeft) {
+        // All of buf is still part of this compressed entry
+        var toFeed = buf;
+        buf = Buffer.alloc(0);
+        compressedLeft -= avail;
+        if (compressedLeft === 0) {
+          inflater.end(toFeed);
+        } else {
+          inflater.write(toFeed);
+        }
+      } else {
+        // buf contains end of this entry + start of next
+        var toFeed2 = buf.slice(0, compressedLeft);
+        buf = buf.slice(compressedLeft);
+        compressedLeft = 0;
+        inflater.end(toFeed2);
+        // inflater 'end' event will call tryNextFile() with remaining buf
+      }
+    }
+
+    function tryNextFile() {
+      while (!done && mode === 'header') {
+        if (buf.length < 4) return;
+        var sig = buf.readUInt32LE(0);
+
+        // Central directory or EOCD: done
+        if (sig === 0x02014b50 || sig === 0x06054b50) {
+          clearTimeout(timer); finish('central-dir'); return;
+        }
+        // Data descriptor (12 or 16 bytes depending on signature presence)
+        if (sig === 0x08074b50) {
+          if (buf.length < 16) return;
+          buf = buf.slice(16); continue;
+        }
+        // Not a local file header: scan for PK\x03\x04
+        if (sig !== 0x04034b50) {
+          var found = -1;
+          for (var i = 1; i <= buf.length - 4; i++) {
+            if (buf[i] === 0x50 && buf[i+1] === 0x4b && buf[i+2] === 0x03 && buf[i+3] === 0x04) {
+              found = i; break;
+            }
+          }
+          if (found === -1) { buf = buf.slice(Math.max(0, buf.length - 3)); return; }
+          buf = buf.slice(found); continue;
+        }
+
+        // Local file header: 30 bytes minimum
+        if (buf.length < 30) return;
+        var flags      = buf.readUInt16LE(6);
+        var method     = buf.readUInt16LE(8);
+        var compSize   = buf.readUInt32LE(18);
+        var fnLen      = buf.readUInt16LE(26);
+        var extraLen   = buf.readUInt16LE(28);
+        var hdrSize    = 30 + fnLen + extraLen;
+        if (buf.length < hdrSize) return;
+
+        var fname = buf.slice(30, 30 + fnLen).toString('utf8');
+        fileCount++;
+        dbg['f' + fileCount] = fname + ' m=' + method + ' sz=' + compSize;
+        buf = buf.slice(hdrSize);
+
+        // Method 0 = stored: skip compSize bytes
+        if (method === 0) {
+          if (compSize > 0) {
+            if (buf.length < compSize) { buf = Buffer.alloc(0); return; }
+            buf = buf.slice(compSize);
+          }
+          continue;
+        }
+
+        // Method 8 = deflate
+        if (method === 8) {
+          var useStreamingMode = false;
+          if (compSize === 0 && (flags & 8)) {
+            // Bit 3: sizes in data descriptor — use streaming inflate
+            // and hope deflate end-of-stream terminates correctly
+            useStreamingMode = true;
+            compressedLeft = 0x7FFFFFFF; // effectively unlimited
+            dbg['f' + fileCount + '_stream'] = true;
+          } else {
+            compressedLeft = compSize;
+          }
+
+          mode = 'data';
+          xmlBuf = '';
+          inflater = zlib.createInflateRaw();
+
+          inflater.on('data', function(chunk) {
+            if (done) return;
+            xmlBuf += chunk.toString('utf8');
+            // Search for Belgian product names
+            var re = /<OfficialName[^>]*>([\s\S]*?)<\/OfficialName>/gi;
+            var mm;
+            while ((mm = re.exec(xmlBuf)) !== null) {
+              var nm = mm[1].replace(/<[^>]+>/g, '').trim();
+              if (nm && matchesTerms(nm, terms) && !foundNames[nm]) {
+                foundNames[nm] = true;
+                products.push({ name: nm, holder: '', status: 'Autoris\u00e9' });
+              }
+            }
+            // Prevent OOM: keep only tail of buffer (regex needs overlap)
+            if (xmlBuf.length > 400000) xmlBuf = xmlBuf.slice(-20000);
+          });
+
+          inflater.on('end', function() {
+            mode = 'header';
+            inflater = null;
+            tryNextFile(); // process remaining buf (next file header)
+          });
+
+          inflater.on('error', function(e2) {
+            dbg['f' + fileCount + '_inflErr'] = e2.message;
+            mode = 'header';
+            inflater = null;
+            // In streaming mode: scan buf for next local file header
+            tryNextFile();
+          });
+
+          if (!useStreamingMode) {
+            processDataBuf();
+          } else {
+            // Streaming mode: just write everything, rely on deflate end-of-stream
+            if (buf.length > 0) {
+              var chunk = buf;
+              buf = Buffer.alloc(0);
+              inflater.write(chunk);
+            }
+          }
+          return; // wait for more data from res.on('data')
+        }
+
+        // Unknown compression method: skip by scanning for next signature
+        dbg['f' + fileCount + '_skip'] = 'method=' + method;
+        // We don't know size, so just scan forward
+        buf = Buffer.alloc(0); return;
+      }
+    }
+
+    var req = https.get(zipUrl, {
+      headers: { 'User-Agent': 'Mozilla/5.0 PharmaScout/1.0', 'Accept': '*/*' }
+    }, function(res) {
+      dbg.zipStatus = res.statusCode;
+      if (res.statusCode !== 200) {
+        clearTimeout(timer);
+        finish('http-' + res.statusCode);
+        return;
+      }
+      res.on('data', function(chunk) {
+        if (done) return;
+        bytesSeen += chunk.length;
+        buf = Buffer.concat([buf, chunk]);
+        if (mode === 'header') {
+          tryNextFile();
+        } else if (mode === 'data') {
+          processDataBuf();
+        }
+      });
+      res.on('end', function() { clearTimeout(timer); finish('stream-end'); });
+      res.on('error', function(e2) { clearTimeout(timer); dbg.zipResErr = e2.message; finish('res-error'); });
+    });
+    req.on('error', function(e2) { clearTimeout(timer); dbg.zipReqErr = e2.message; finish('req-error'); });
+    req.setTimeout(timeoutMs + 3000, function() { req.destroy(); finish('req-timeout'); });
   });
 }
 
@@ -357,72 +413,66 @@ async function fetchBelgium(substance, terms) {
   var beDebug = {};
   var products = [];
 
-  // ── Strategy 1: SAM REST API variants ──
+  // ── Step 0: Fetch SAM version ──
+  var samVersion = await getSamVersion(beDebug);
+
+  // ── Strategy 1: SAM REST API variants (will likely 404/502, but quick) ──
   var samUrls = [
-    // without /websamcivics/ prefix (502 in browser but might work from Lambda)
     'https://www.vas.ehealth.fgov.be/samcivics/rest/samv2/amp?officialName=' + encodeURIComponent(substance) + '&language=fr&status=AUTHORIZED&pageSize=100',
-    // with prefix (was 404 before but retry)
     'https://www.vas.ehealth.fgov.be/websamcivics/samcivics/rest/samv2/amp?officialName=' + encodeURIComponent(substance) + '&language=fr&status=AUTHORIZED&pageSize=100',
-    // alternative: search by ingredient
     'https://www.vas.ehealth.fgov.be/websamcivics/samcivics/rest/samv2/amp?ingredientName=' + encodeURIComponent(substance) + '&language=fr&pageSize=100',
-    // samv2 without domain prefix
-    'https://www.ehealth.fgov.be/samcivics/rest/samv2/amp?officialName=' + encodeURIComponent(substance) + '&language=fr&status=AUTHORIZED&pageSize=100',
   ];
 
   for (var si = 0; si < samUrls.length && products.length === 0; si++) {
     beDebug['s1url' + si] = samUrls[si].substring(0, 100);
     try {
-      var txt = await fetchApiText(samUrls[si], 6000);
+      var txt = await fetchApiText(samUrls[si], 5000);
       beDebug['s1len' + si] = txt.length;
       beDebug['s1pre' + si] = txt.substring(0, 200);
-      // Try JSON first
       var jp = parseSamJson(txt, terms, beDebug, 's1j' + si);
       if (jp.length > 0) { products = jp; break; }
-      // Try XML
       var xp = parseSamXml(txt, terms);
-      beDebug['s1xmlHits' + si] = xp.length;
+      beDebug['s1xml' + si] = xp.length;
       if (xp.length > 0) { products = xp; break; }
     } catch(e) {
       beDebug['s1err' + si] = e.message;
     }
   }
 
-  // ── Strategy 2: CBIP.be HTML scraping ──
+  // ── Strategy 2: CBIP .frag with browser headers ──
   if (products.length === 0) {
-    var cbipUrls = [
+    // Fragment 6189 = "7.2 Troubles mictionnels de l'homme" (BPH chapter)
+    // Try with Referer to avoid 406
+    var cbipHeaders = {
+      'Referer': 'https://www.cbip.be/fr/chapters/8?frag=6049',
+      'X-Requested-With': 'XMLHttpRequest',
+      'Accept': 'text/html, */*',
+      'Cookie': ''
+    };
+    var cbipFragUrls = [
+      'https://www.cbip.be/fr/contents/6189.frag',
       'https://www.cbip.be/fr/search?query=' + encodeURIComponent(substance),
-      'https://www.cbip.be/nl/search?query=' + encodeURIComponent(substance),
-      'https://www.cbip.be/fr/chapters?searchParams=' + encodeURIComponent(substance),
     ];
-    for (var ci = 0; ci < cbipUrls.length && products.length === 0; ci++) {
-      beDebug['s2url' + ci] = cbipUrls[ci];
+    for (var ci = 0; ci < cbipFragUrls.length && products.length === 0; ci++) {
+      beDebug['s2url' + ci] = cbipFragUrls[ci];
       try {
-        var html = await fetchApiText(cbipUrls[ci], 8000);
+        var html = await fetchApiText(cbipFragUrls[ci], 8000, cbipHeaders);
         beDebug['s2len' + ci] = html.length;
-        beDebug['s2pre' + ci] = html.substring(0, 300);
-
-        // Look for product names in various HTML patterns
-        var seen = {};
-        // Pattern: data-title or title attributes containing substance
-        var reAttr = /(?:data-title|title|data-name|data-label)="([^"]{3,80})"/gi;
-        var mm;
-        while ((mm = reAttr.exec(html)) !== null) {
-          var cand = mm[1].trim();
-          if (matchesTerms(cand, terms) && !seen[cand]) {
-            seen[cand] = true;
-            products.push({ name: cand, holder: '', status: 'Autoris\u00e9' });
-          }
+        beDebug['s2pre' + ci] = html.substring(0, 400);
+        var seen2 = {};
+        // Try various patterns
+        var re2a = /(?:data-title|data-name|alt)="([^"]{5,80})"/gi;
+        var mm2;
+        while ((mm2 = re2a.exec(html)) !== null) {
+          var c2 = mm2[1].trim();
+          if (matchesTerms(c2, terms) && !seen2[c2]) { seen2[c2] = true; products.push({ name: c2, holder: '', status: 'Autoris\u00e9' }); }
           if (products.length >= 50) break;
         }
-        // Pattern: link text or heading content
         if (products.length === 0) {
-          var reH = /<(?:h[1-6]|a|span|li|td)[^>]*>([^<]{3,80})<\/(?:h[1-6]|a|span|li|td)>/gi;
-          while ((mm = reH.exec(html)) !== null) {
-            var cand2 = mm[1].trim().replace(/\s+/g, ' ');
-            if (matchesTerms(cand2, terms) && !seen[cand2]) {
-              seen[cand2] = true;
-              products.push({ name: cand2, holder: '', status: 'Autoris\u00e9' });
-            }
+          var re2b = /<(?:h[1-6]|a|span|li|td)[^>]*>([^<]{5,80})<\/(?:h[1-6]|a|span|li|td)>/gi;
+          while ((mm2 = re2b.exec(html)) !== null) {
+            var c2b = mm2[1].trim().replace(/\s+/g, ' ');
+            if (matchesTerms(c2b, terms) && !seen2[c2b]) { seen2[c2b] = true; products.push({ name: c2b, holder: '', status: 'Autoris\u00e9' }); }
             if (products.length >= 50) break;
           }
         }
@@ -433,40 +483,15 @@ async function fetchBelgium(substance, terms) {
     }
   }
 
-  // ── Strategy 3: BCFI (bcfi.be) HTML ──
+  // ── Strategy 3: SAM ZIP streaming (main fix: version param now correct) ──
   if (products.length === 0) {
+    beDebug.s3start = 'v' + samVersion;
     try {
-      var bcfiUrl = 'https://www.bcfi.be/fr/search?q=' + encodeURIComponent(substance);
-      beDebug.s3url = bcfiUrl;
-      var bcfiHtml = await fetchApiText(bcfiUrl, 8000);
-      beDebug.s3len = bcfiHtml.length;
-      beDebug.s3pre = bcfiHtml.substring(0, 400);
-      var seen3 = {};
-      var re3 = /<(?:h[1-6]|a|span|li|td|div)[^>]*>([^<]{5,100})<\/(?:h[1-6]|a|span|li|td|div)>/gi;
-      var mm3;
-      while ((mm3 = re3.exec(bcfiHtml)) !== null) {
-        var c3 = mm3[1].trim().replace(/\s+/g, ' ');
-        if (matchesTerms(c3, terms) && !seen3[c3]) {
-          seen3[c3] = true;
-          products.push({ name: c3, holder: '', status: 'Autoris\u00e9' });
-        }
-        if (products.length >= 50) break;
-      }
-      beDebug.s3hits = products.length;
-    } catch(e) {
-      beDebug.s3err = e.message;
-    }
-  }
-
-  // ── Strategy 4: Stream SAM ZIP (Node.js inflateRaw, up to 15s) ──
-  if (products.length === 0) {
-    try {
-      beDebug.s4 = 'starting zip stream';
-      var zipProducts = await streamSamZip(substance, terms, beDebug, 15000);
-      beDebug.s4hits = zipProducts.length;
+      var zipProducts = await streamSamZip(substance, terms, beDebug, samVersion, 18000);
+      beDebug.s3hits = zipProducts.length;
       if (zipProducts.length > 0) products = zipProducts;
     } catch(e) {
-      beDebug.s4err = e.message;
+      beDebug.s3err = e.message;
     }
   }
 
