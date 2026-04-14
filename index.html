@@ -1287,18 +1287,29 @@ async function fetchEUProducts(substance) {
   try {
     const territories = ['fr','es','pt','be'];
     const results = {};
+
+    // Helper: fetch one country with up to 3 attempts (handles cold-start 502s)
+    async function fetchCountry(t, attempt) {
+      if (attempt > 1) await sleep(1500 * (attempt - 1)); // 1.5s then 3s between retries
+      const r = await fetch(`/.netlify/functions/eu-products?substance=${encodeURIComponent(substance)}&country=${t}`);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const d = await r.json();
+      const countryData = (d.countries || [])[0] || d;
+      return { products: countryData.products || [], total: countryData.total || 0 };
+    }
+
+    // First pass: all countries in parallel
     await Promise.allSettled(territories.map(async (t) => {
-      try {
-        const r = await fetch(`/.netlify/functions/eu-products?substance=${encodeURIComponent(substance)}&country=${t}`);
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const d = await r.json();
-        // API returns { countries: [{code, total, products}] } — extract first country
-        const countryData = (d.countries || [])[0] || d;
-        results[t] = { products: countryData.products || [], total: countryData.total || 0 };
-      } catch(e) {
-        results[t] = { products: [], error: e.message };
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          results[t] = await fetchCountry(t, attempt);
+          break; // success
+        } catch(e) {
+          if (attempt === 3) results[t] = { products: [], error: e.message };
+        }
       }
     }));
+
     hide('eu-products-loading');
     renderEUProducts(results);
   } catch(e) {
