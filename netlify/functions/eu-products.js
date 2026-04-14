@@ -329,7 +329,18 @@ function streamSamZip(substance, terms, dbg, version, timeoutMs) {
 
           mode = 'data';
           xmlBuf = '';
-          inflater = zlib.createInflateRaw();
+          // Capture first 8 bytes of compressed data for format diagnosis
+          if (buf.length > 0) {
+            dbg['f' + fileCount + '_first8'] = buf.slice(0, Math.min(8, buf.length)).toString('hex');
+          }
+          // Auto-detect zlib vs raw deflate from first 2 bytes:
+          // 0x78 0x01/9C/DA/5E/9D/BB/F9 = zlib header → createInflate()
+          // anything else = raw deflate → createInflateRaw()
+          var isZlibWrapped = buf.length >= 2 && buf[0] === 0x78 &&
+            (buf[1] === 0x01 || buf[1] === 0x9c || buf[1] === 0xda || buf[1] === 0x5e ||
+             buf[1] === 0x9d || buf[1] === 0xbb || buf[1] === 0xf9);
+          dbg['f' + fileCount + '_zlibWrapped'] = isZlibWrapped;
+          inflater = isZlibWrapped ? zlib.createInflate() : zlib.createInflateRaw();
 
           inflater.on('data', function(chunk) {
             if (done) return;
@@ -378,7 +389,6 @@ function streamSamZip(substance, terms, dbg, version, timeoutMs) {
             dbg['f' + fileCount + '_inflErr'] = e2.message;
             mode = 'header';
             inflater = null;
-            // In streaming mode: scan buf for next local file header
             tryNextFile();
           });
 
