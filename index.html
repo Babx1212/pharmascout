@@ -1065,7 +1065,7 @@
             <div class="col-4">
               <div class="metric-box">
                 <div class="metric-value" id="m-generics">-</div>
-                <div class="metric-label">Génériques approuv-s</div>
+                <div class="metric-label">Génériques approuvés</div>
                 <div class="metric-sub">FDA (ANDAs)</div>
               </div>
             </div>
@@ -1094,7 +1094,7 @@
           <div class="section-heading mt-3"><i class="bi bi-globe-europe-africa"></i>Marchés européens</div>
           <div id="eu-products-loading" style="text-align:center;padding:16px;color:var(--text-muted);display:none">
             <div class="spinner" style="width:24px;height:24px;margin:0 auto 8px"></div>
-            Interrogation des bases européennes-
+            Interrogation des bases européennes...
           </div>
           <div id="eu-products-error" style="display:none" class="flag-item flag-warning">
             <i class="bi bi-exclamation-triangle"></i>
@@ -1292,7 +1292,9 @@ async function fetchEUProducts(substance) {
         const r = await fetch(`/.netlify/functions/eu-products?substance=${encodeURIComponent(substance)}&country=${t}`);
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const d = await r.json();
-        results[t] = d;
+        // API returns { countries: [{code, total, products}] } — extract first country
+        const countryData = (d.countries || [])[0] || d;
+        results[t] = { products: countryData.products || [], total: countryData.total || 0 };
       } catch(e) {
         results[t] = { products: [], error: e.message };
       }
@@ -1338,7 +1340,7 @@ function renderEUProducts(results) {
     if (data.error && items.length === 0) {
       html += `<div class="flag-item flag-secondary" style="margin:0 0 4px">
         <i class="bi bi-info-circle"></i>
-        <span style="font-size:0.78rem;color:var(--text-muted)">${data.error.includes('timeout') ? 'D-lai d-pass- - données temporairement indisponibles' : 'Source indisponible : ' + data.error}</span>
+        <span style="font-size:0.78rem;color:var(--text-muted)">${data.error.includes('timeout') ? 'Délai dépassé - données temporairement indisponibles' : 'Source indisponible : ' + data.error}</span>
       </div>`;
     } else if (items.length === 0) {
       html += `<div style="padding:8px 12px;font-size:0.78rem;color:var(--text-muted)">
@@ -2038,7 +2040,7 @@ async function analyze() {
     setLoading(true, '-- FDA FAERS -- effets ind-sirables--', 15);
     state.faers = await fetchFAERS(substance);
 
-    setLoading(true, '-- FDA Orange Book -- génériques approuv-s--', 40);
+    setLoading(true, '-- FDA Orange Book -- génériques approuvés--', 40);
     state.generics = await fetchGenerics(substance);
 
     setLoading(true, '-- PubMed -- littérature scientifique--', 62);
@@ -2101,7 +2103,7 @@ SCORE COMPOSÉITE     : ${cp.score} / 10RECOMMANDATION      : ${cp.rec}
                       ${cp.recDetail}
 // --------------------------------------------------------------------------------------------------------------------
 
-SCORES D-TAILL-S
+SCORES DÉTAILLÉS
   ----  S-
 curit-     : ${sf.score} / 10
   ----  Concurrence  : ${cs.score} / 10
@@ -2124,7 +2126,7 @@ LITT-RATURE (PubMed)
 // -----------------------------
 // --------------------------------------------------------------------------------------
 CONCURRENCE (FDA Orange Book)
-  Génériques approuv-s     : ${cs.n} (ANDAs)
+  Génériques approuvés     : ${cs.n} (ANDAs)
   Produits originaux       : ${cs.nda} (NDAs)
   Niveau de concurrence    : ${cs.level}
   Fabricants identifiés    : ${cs.manufacturers.length > 0 ? cs.manufacturers.join(', ') : 'N/A'}
@@ -2470,6 +2472,39 @@ function renderSwissmedic(d) {
   link.href = `https://www.swissmedic.ch/swissmedic/en/home/humanarzneimittel/authorisations/authorised-human-medicinal-products/search.html?query=${encodeURIComponent(d.substance)}`;
 
   injectSwissFlagsIntoSafety(d);
+
+  // Inject CH products into the Concurrence tab (eu-territory-groups)
+  const euGroups = document.getElementById('eu-territory-groups');
+  if (euGroups) {
+    // Remove any previous CH group
+    const existing = document.getElementById('ch-territory-group');
+    if (existing) existing.remove();
+
+    const products = d.products || [];
+    const chHtml = `<div class="territory-group" id="ch-territory-group">
+      <div class="territory-header" data-bs-toggle="collapse" data-bs-target="#territory-collapse-ch">
+        <span>-- Suisse (CH)</span>
+        <span style="font-size:0.72rem;color:var(--text-muted);font-weight:400">Swissmedic</span>
+        <span class="count-badge">${products.length > 0 ? products.length + ' produit' + (products.length > 1 ? 's' : '') : 'Aucun'}</span>
+      </div>
+      <div class="collapse show" id="territory-collapse-ch">
+        ${products.length > 0
+          ? `<table class="data-table" style="margin-bottom:0"><thead><tr><th>Médicament</th><th>Titulaire</th></tr></thead><tbody>
+              ${products.slice(0, 12).map(p => `<tr><td>${p.name || '--'}</td><td style="color:var(--text-muted)">${p.holder || '--'}</td></tr>`).join('')}
+              ${products.length > 12 ? `<tr><td colspan="2" style="color:var(--text-subtle);font-size:0.72rem;text-align:center">+${products.length - 12} produits supplémentaires</td></tr>` : ''}
+             </tbody></table>`
+          : '<div style="padding:8px 12px;font-size:0.78rem;color:var(--text-muted)">Aucun produit identifié sur ce marché.</div>'
+        }
+      </div>
+    </div>`;
+    euGroups.insertAdjacentHTML('beforeend', chHtml);
+
+    // Also ensure eu-products-content is visible
+    const euContent = document.getElementById('eu-products-content');
+    if (euContent && euContent.style.display === 'none') {
+      show('eu-products-content');
+    }
+  }
 }
 
 function show(id) { const el = document.getElementById(id); if(el) el.style.display = ''; }
