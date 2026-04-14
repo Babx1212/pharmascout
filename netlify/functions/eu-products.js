@@ -334,17 +334,37 @@ function streamSamZip(substance, terms, dbg, version, timeoutMs) {
           inflater.on('data', function(chunk) {
             if (done) return;
             xmlBuf += chunk.toString('utf8');
-            // Search for Belgian product names
-            var re = /<OfficialName[^>]*>([\s\S]*?)<\/OfficialName>/gi;
+
+            // Capture first bytes of decompressed XML for debugging
+            if (!dbg.xmlSample && xmlBuf.length >= 200) {
+              dbg.xmlSample = xmlBuf.substring(0, 800);
+            }
+
             var mm;
-            while ((mm = re.exec(xmlBuf)) !== null) {
-              var nm = mm[1].replace(/<[^>]+>/g, '').trim();
-              if (nm && matchesTerms(nm, terms) && !foundNames[nm]) {
-                foundNames[nm] = true;
-                products.push({ name: nm, holder: '', status: 'Autoris\u00e9' });
+            // Search 1: OfficialName with optional namespace prefix
+            // Handles both <OfficialName> and <ns3:OfficialName> etc.
+            var re1 = /<[^>]*OfficialName[^>]*>([^<]+)/gi;
+            while ((mm = re1.exec(xmlBuf)) !== null) {
+              var nm1 = mm[1].trim();
+              if (nm1 && matchesTerms(nm1, terms) && !foundNames[nm1]) {
+                foundNames[nm1] = true;
+                products.push({ name: nm1, holder: '', status: 'Autoris\u00e9' });
               }
             }
-            // Prevent OOM: keep only tail of buffer (regex needs overlap)
+
+            // Search 2: broader fallback — any text node matching our terms
+            if (products.length === 0) {
+              var re2 = />([^<]{5,120})</g;
+              while ((mm = re2.exec(xmlBuf)) !== null) {
+                var nm2 = mm[1].trim();
+                if (nm2 && matchesTerms(nm2, terms) && !foundNames[nm2]) {
+                  foundNames[nm2] = true;
+                  products.push({ name: nm2, holder: '', status: 'Autoris\u00e9' });
+                }
+              }
+            }
+
+            // Prevent OOM: keep only tail (regex needs overlap for split tags)
             if (xmlBuf.length > 400000) xmlBuf = xmlBuf.slice(-20000);
           });
 
