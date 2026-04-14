@@ -187,25 +187,30 @@ function parseSamJson(txt, terms, dbg, pfx) {
   return products;
 }
 
-// Fetch current SAM version
+// Fetch current SAM version (try both known URL variants)
 async function getSamVersion(dbg) {
-  try {
-    var txt = await fetchApiText(
-      'https://www.vas.ehealth.fgov.be/websamcivics/samcivics/download/samv2-full-getLastVersion?xsd=6',
-      6000
-    );
-    dbg.samVersionRaw = txt.substring(0, 60);
-    var m = txt.match(/\d+/);
-    if (m) return m[0];
-  } catch(e) {
-    dbg.samVersionErr = e.message;
+  var versionUrls = [
+    'https://www.vas.ehealth.fgov.be/websamcivics/samcivics/download/samv2-fullgetLastVersion?xsd=6',
+    'https://www.vas.ehealth.fgov.be/websamcivics/samcivics/download/samv2-full-getLastVersion?xsd=6'
+  ];
+  for (var i = 0; i < versionUrls.length; i++) {
+    try {
+      var txt = await fetchApiText(versionUrls[i], 6000);
+      dbg['samVersionRaw' + i] = txt.substring(0, 60);
+      var m = txt.match(/\d+/);
+      if (m) return m[0];
+    } catch(e) {
+      dbg['samVersionErr' + i] = e.message;
+    }
   }
   return '11839'; // last known fallback
 }
 
-// Stream SAM ZIP with proper compressedSize tracking
-// Fixed from v10: now tracks compressedLeft per-entry to avoid feeding
-// extra bytes (next file header) to the inflater.
+// Stream SAM ZIP: v14 improvements:
+//  - Increased timeout to 23s (was 18s)
+//  - Per-file XML sample (first 5000 chars) for schema diagnosis
+//  - Raw text search: when substance found in XML, capture 600-char context
+//  - Larger xmlBuf tail (100KB instead of 20KB) to reduce missed matches at trim boundary
 function streamSamZip(substance, terms, dbg, version, timeoutMs) {
   return new Promise(function(resolve) {
     var products = [];
@@ -218,11 +223,13 @@ function streamSamZip(substance, terms, dbg, version, timeoutMs) {
     var buf = Buffer.alloc(0);
     var fileCount = 0;
     var xmlBuf = '';
+    var xmlSampleCaptured = {};
 
     // State machine
     var mode = 'header'; // 'header' | 'data'
-    var compressedLeft = 0; // bytes of compressed data still to feed to inflater
+    var compressedLeft = 0;
     var inflater = null;
+    var currentFIdx = 0;
 
     function finish(reason) {
       if (done) return;
@@ -245,7 +252,6 @@ function streamSamZip(substance, terms, dbg, version, timeoutMs) {
 
       var avail = buf.length;
       if (avail <= compressedLeft) {
-        // All of buf is still part of this compressed entry
         var toFeed = buf;
         buf = Buffer.alloc(0);
         compressedLeft -= avail;
@@ -255,7 +261,6 @@ function streamSamZip(substance, terms, dbg, version, timeoutMs) {
           inflater.write(toFeed);
         }
       } else {
-        // buf contains end of this entry + start of next
         var toFeed2 = buf.slice(0, compressedLeft);
         buf = buf.slice(compressedLeft);
         compressedLeft = 0;
@@ -273,7 +278,7 @@ function streamSamZip(substance, terms, dbg, version, timeoutMs) {
         if (sig === 0x02014b50 || sig === 0x06054b50) {
           clearTimeout(timer); finish('central-dir'); return;
         }
-        // Data descriptor (12 or 16 bytes depending on signature presence)
+        // Data descriptor (skip 16 bytes)
         if (sig === 0x08074b50) {
           if (buf.length < 16) return;
           buf = buf.slice(16); continue;
@@ -302,7 +307,9 @@ function streamSamZip(substance, terms, dbg, version, timeoutMs) {
 
         var fname = buf.slice(30, 30 + fnLen).toString('utf8');
         fileCount++;
-        dbg['f' + fileCount] = fname + ' m=' + method + ' sz=' + compSize;
+        var fIdx = fileCount;
+        currentFIdx = fIdx;
+        dbg['f' + fIdx] = fname + ' m=' + method + ' sz=' + compSize;
         buf = buf.slice(hdrSize);
 
         // Method 0 = stored: skip compSize bytes
@@ -318,84 +325,127 @@ function streamSamZip(substance, terms, dbg, version, timeoutMs) {
         if (method === 8) {
           var useStreamingMode = false;
           if (compSize === 0 && (flags & 8)) {
-            // Bit 3: sizes in data descriptor — use streaming inflate
-            // and hope deflate end-of-stream terminates correctly
             useStreamingMode = true;
-            compressedLeft = 0x7FFFFFFF; // effectively unlimited
-            dbg['f' + fileCount + '_stream'] = true;
+            compressedLeft = 0x7FFFFFFF;
+            dbg['f' + fIdx + '_stream'] = true;
           } else {
             compressedLeft = compSize;
           }
 
           mode = 'data';
           xmlBuf = '';
+
           // Capture first 8 bytes of compressed data for format diagnosis
           if (buf.length > 0) {
-            dbg['f' + fileCount + '_first8'] = buf.slice(0, Math.min(8, buf.length)).toString('hex');
+            dbg['f' + fIdx + '_first8'] = buf.slice(0, Math.min(8, buf.length)).toString('hex');
           }
-          // Auto-detect zlib vs raw deflate from first 2 bytes:
-          // 0x78 0x01/9C/DA/5E/9D/BB/F9 = zlib header → createInflate()
-          // anything else = raw deflate → createInflateRaw()
+          // Auto-detect zlib vs raw deflate
           var isZlibWrapped = buf.length >= 2 && buf[0] === 0x78 &&
             (buf[1] === 0x01 || buf[1] === 0x9c || buf[1] === 0xda || buf[1] === 0x5e ||
              buf[1] === 0x9d || buf[1] === 0xbb || buf[1] === 0xf9);
-          dbg['f' + fileCount + '_zlibWrapped'] = isZlibWrapped;
+          dbg['f' + fIdx + '_zlibWrapped'] = isZlibWrapped;
           inflater = isZlibWrapped ? zlib.createInflate() : zlib.createInflateRaw();
 
-          inflater.on('data', function(chunk) {
-            if (done) return;
-            xmlBuf += chunk.toString('utf8');
+          // Closure-capture fIdx for callbacks
+          (function(fi) {
+            inflater.on('data', function(chunk) {
+              if (done) return;
+              xmlBuf += chunk.toString('utf8');
 
-            // Capture first bytes of decompressed XML for debugging
-            if (!dbg.xmlSample && xmlBuf.length >= 200) {
-              dbg.xmlSample = xmlBuf.substring(0, 800);
-            }
-
-            var mm;
-            // Search 1: OfficialName with optional namespace prefix
-            // Handles both <OfficialName> and <ns3:OfficialName> etc.
-            var re1 = /<[^>]*OfficialName[^>]*>([^<]+)/gi;
-            while ((mm = re1.exec(xmlBuf)) !== null) {
-              var nm1 = mm[1].trim();
-              if (nm1 && matchesTerms(nm1, terms) && !foundNames[nm1]) {
-                foundNames[nm1] = true;
-                products.push({ name: nm1, holder: '', status: 'Autoris\u00e9' });
+              // Capture per-file XML sample (first 5000 chars) for schema diagnosis
+              if (!xmlSampleCaptured[fi] && xmlBuf.length >= 300) {
+                dbg['f' + fi + '_xml'] = xmlBuf.substring(0, 5000);
+                xmlSampleCaptured[fi] = true;
               }
-            }
 
-            // Search 2: broader fallback — any text node matching our terms
-            if (products.length === 0) {
-              var re2 = />([^<]{5,120})</g;
-              while ((mm = re2.exec(xmlBuf)) !== null) {
-                var nm2 = mm[1].trim();
-                if (nm2 && matchesTerms(nm2, terms) && !foundNames[nm2]) {
-                  foundNames[nm2] = true;
-                  products.push({ name: nm2, holder: '', status: 'Autoris\u00e9' });
+              // Method 1: OfficialName element search (namespace-aware)
+              // Matches <OfficialName>, <ns2:OfficialName>, <ns3:OfficialName> etc.
+              var re1 = /<[^>]*OfficialName[^>]*>([^<]+)/gi;
+              var mm;
+              while ((mm = re1.exec(xmlBuf)) !== null) {
+                var nm1 = mm[1].trim();
+                if (nm1 && matchesTerms(nm1, terms) && !foundNames[nm1]) {
+                  foundNames[nm1] = true;
+                  products.push({ name: nm1, holder: '', status: 'Autoris\u00e9' });
+                }
+                if (products.length >= 50) break;
+              }
+
+              // Method 2: Raw text search — find substance string anywhere in XML
+              // This catches names regardless of element structure
+              if (xmlBuf.length > 0) {
+                var xmlLow = xmlBuf.toLowerCase();
+                for (var ti = 0; ti < terms.length; ti++) {
+                  var tl = terms[ti].toLowerCase();
+                  var pos = 0;
+                  while ((pos = xmlLow.indexOf(tl, pos)) !== -1) {
+                    // Capture context around match for debug
+                    if (!dbg['f' + fi + '_substCtx']) {
+                      dbg['f' + fi + '_substCtx'] = xmlBuf.substring(Math.max(0, pos - 300), pos + 400);
+                    }
+
+                    // Look for a tag-contained name near the match
+                    var ctxStart = Math.max(0, pos - 800);
+                    var ctxEnd = Math.min(xmlBuf.length, pos + 500);
+                    var ctxStr = xmlBuf.substring(ctxStart, ctxEnd);
+
+                    // Try extracting from any *Name* element in context
+                    var reCtx = /<[^>]*[Nn]ame[^>]*>([^<]{4,120})<\/[^>]+>/g;
+                    var mCtx;
+                    while ((mCtx = reCtx.exec(ctxStr)) !== null) {
+                      var nmCtx = mCtx[1].trim();
+                      if (nmCtx && matchesTerms(nmCtx, terms) && !foundNames[nmCtx]) {
+                        foundNames[nmCtx] = true;
+                        products.push({ name: nmCtx, holder: '', status: 'Autoris\u00e9' });
+                      }
+                      if (products.length >= 50) break;
+                    }
+
+                    // Fallback: extract any text node containing the term
+                    if (products.length === 0) {
+                      var reTxt = />([^<]{3,120})<\//g;
+                      var mTxt;
+                      while ((mTxt = reTxt.exec(ctxStr)) !== null) {
+                        var nmTxt = mTxt[1].trim();
+                        if (nmTxt && matchesTerms(nmTxt, terms) && !foundNames[nmTxt] && nmTxt.length < 120) {
+                          foundNames[nmTxt] = true;
+                          products.push({ name: nmTxt, holder: '', status: 'Autoris\u00e9' });
+                        }
+                        if (products.length >= 50) break;
+                      }
+                    }
+
+                    pos += tl.length;
+                    if (products.length >= 50) break;
+                  }
+                  if (products.length >= 50) break;
                 }
               }
-            }
 
-            // Prevent OOM: keep only tail (regex needs overlap for split tags)
-            if (xmlBuf.length > 400000) xmlBuf = xmlBuf.slice(-20000);
-          });
+              // Prevent OOM: keep last 100KB (was 20KB in v13 — larger tail
+              // reduces chance of missing a name split across trim boundaries)
+              if (xmlBuf.length > 600000) xmlBuf = xmlBuf.slice(-100000);
+            });
 
-          inflater.on('end', function() {
-            mode = 'header';
-            inflater = null;
-            tryNextFile(); // process remaining buf (next file header)
-          });
+            inflater.on('end', function() {
+              dbg['f' + fi + '_inflEnd'] = true;
+              mode = 'header';
+              inflater = null;
+              tryNextFile();
+            });
 
-          inflater.on('error', function(e2) {
-            dbg['f' + fileCount + '_inflErr'] = e2.message;
-            mode = 'header';
-            inflater = null;
-            tryNextFile();
-          });
+            inflater.on('error', function(e2) {
+              dbg['f' + fi + '_inflErr'] = e2.message;
+              mode = 'header';
+              inflater = null;
+              tryNextFile();
+            });
+          })(fIdx);
 
           if (!useStreamingMode) {
             processDataBuf();
           } else {
-            // Streaming mode: just write everything, rely on deflate end-of-stream
+            // Streaming mode: write everything, rely on deflate end-of-stream
             if (buf.length > 0) {
               var chunk = buf;
               buf = Buffer.alloc(0);
@@ -406,8 +456,7 @@ function streamSamZip(substance, terms, dbg, version, timeoutMs) {
         }
 
         // Unknown compression method: skip by scanning for next signature
-        dbg['f' + fileCount + '_skip'] = 'method=' + method;
-        // We don't know size, so just scan forward
+        dbg['f' + fIdx + '_skip'] = 'method=' + method;
         buf = Buffer.alloc(0); return;
       }
     }
@@ -446,7 +495,7 @@ async function fetchBelgium(substance, terms) {
   // ── Step 0: Fetch SAM version ──
   var samVersion = await getSamVersion(beDebug);
 
-  // ── Strategy 1: SAM REST API variants (will likely 404/502, but quick) ──
+  // ── Strategy 1: SAM REST API variants ──
   var samUrls = [
     'https://www.vas.ehealth.fgov.be/samcivics/rest/samv2/amp?officialName=' + encodeURIComponent(substance) + '&language=fr&status=AUTHORIZED&pageSize=100',
     'https://www.vas.ehealth.fgov.be/websamcivics/samcivics/rest/samv2/amp?officialName=' + encodeURIComponent(substance) + '&language=fr&status=AUTHORIZED&pageSize=100',
@@ -469,59 +518,118 @@ async function fetchBelgium(substance, terms) {
     }
   }
 
-  // ── Strategy 2: CBIP .frag with browser headers ──
+  // ── Strategy 2: mymedicine.be search (public Belgian patient portal) ──
   if (products.length === 0) {
-    // Fragment 6189 = "7.2 Troubles mictionnels de l'homme" (BPH chapter)
-    // Try with Referer to avoid 406
+    try {
+      var mmUrl = 'https://www.mymedicine.be/nl/search?q=' + encodeURIComponent(substance);
+      beDebug.s2url = mmUrl;
+      var mmHtml = await fetchApiText(mmUrl, 8000, {
+        'Referer': 'https://www.mymedicine.be/',
+        'Accept': 'text/html,application/xhtml+xml,*/*'
+      });
+      beDebug.s2len = mmHtml.length;
+      beDebug.s2pre = mmHtml.substring(0, 600);
+      var seen2 = {};
+      // Extract product names from anchor/title tags
+      var re2a = /(?:data-title|title)="([^"]{5,100})"/gi;
+      var mm2a;
+      while ((mm2a = re2a.exec(mmHtml)) !== null) {
+        var c2a = mm2a[1].trim();
+        if (matchesTerms(c2a, terms) && !seen2[c2a]) { seen2[c2a] = true; products.push({ name: c2a, holder: '', status: 'Autoris\u00e9' }); }
+        if (products.length >= 50) break;
+      }
+      // Fallback: text in headings/links
+      if (products.length === 0) {
+        var re2b = /<(?:h[1-4]|a)[^>]*>([^<]{5,100})<\/(?:h[1-4]|a)>/gi;
+        var mm2b;
+        while ((mm2b = re2b.exec(mmHtml)) !== null) {
+          var c2b = mm2b[1].trim().replace(/\s+/g, ' ');
+          if (matchesTerms(c2b, terms) && !seen2[c2b]) { seen2[c2b] = true; products.push({ name: c2b, holder: '', status: 'Autoris\u00e9' }); }
+          if (products.length >= 50) break;
+        }
+      }
+      beDebug.s2hits = products.length;
+    } catch(e) {
+      beDebug.s2err = e.message;
+    }
+  }
+
+  // ── Strategy 3: CBIP search ──
+  if (products.length === 0) {
     var cbipHeaders = {
-      'Referer': 'https://www.cbip.be/fr/chapters/8?frag=6049',
+      'Referer': 'https://www.cbip.be/',
       'X-Requested-With': 'XMLHttpRequest',
-      'Accept': 'text/html, */*',
-      'Cookie': ''
+      'Accept': 'text/html, */*'
     };
-    var cbipFragUrls = [
-      'https://www.cbip.be/fr/contents/6189.frag',
+    var cbipUrls = [
       'https://www.cbip.be/fr/search?query=' + encodeURIComponent(substance),
+      'https://www.cbip.be/nl/search?query=' + encodeURIComponent(substance),
     ];
-    for (var ci = 0; ci < cbipFragUrls.length && products.length === 0; ci++) {
-      beDebug['s2url' + ci] = cbipFragUrls[ci];
+    for (var ci = 0; ci < cbipUrls.length && products.length === 0; ci++) {
+      beDebug['s3url' + ci] = cbipUrls[ci];
       try {
-        var html = await fetchApiText(cbipFragUrls[ci], 8000, cbipHeaders);
-        beDebug['s2len' + ci] = html.length;
-        beDebug['s2pre' + ci] = html.substring(0, 400);
-        var seen2 = {};
-        // Try various patterns
-        var re2a = /(?:data-title|data-name|alt)="([^"]{5,80})"/gi;
-        var mm2;
-        while ((mm2 = re2a.exec(html)) !== null) {
-          var c2 = mm2[1].trim();
-          if (matchesTerms(c2, terms) && !seen2[c2]) { seen2[c2] = true; products.push({ name: c2, holder: '', status: 'Autoris\u00e9' }); }
+        var cHtml = await fetchApiText(cbipUrls[ci], 8000, cbipHeaders);
+        beDebug['s3len' + ci] = cHtml.length;
+        beDebug['s3pre' + ci] = cHtml.substring(0, 400);
+        var seen3 = {};
+        var re3a = /(?:data-title|data-name|alt)="([^"]{5,80})"/gi;
+        var mm3;
+        while ((mm3 = re3a.exec(cHtml)) !== null) {
+          var c3 = mm3[1].trim();
+          if (matchesTerms(c3, terms) && !seen3[c3]) { seen3[c3] = true; products.push({ name: c3, holder: '', status: 'Autoris\u00e9' }); }
           if (products.length >= 50) break;
         }
         if (products.length === 0) {
-          var re2b = /<(?:h[1-6]|a|span|li|td)[^>]*>([^<]{5,80})<\/(?:h[1-6]|a|span|li|td)>/gi;
-          while ((mm2 = re2b.exec(html)) !== null) {
-            var c2b = mm2[1].trim().replace(/\s+/g, ' ');
-            if (matchesTerms(c2b, terms) && !seen2[c2b]) { seen2[c2b] = true; products.push({ name: c2b, holder: '', status: 'Autoris\u00e9' }); }
+          var re3b = /<(?:h[1-6]|a|span|li|td)[^>]*>([^<]{5,80})<\/(?:h[1-6]|a|span|li|td)>/gi;
+          while ((mm3 = re3b.exec(cHtml)) !== null) {
+            var c3b = mm3[1].trim().replace(/\s+/g, ' ');
+            if (matchesTerms(c3b, terms) && !seen3[c3b]) { seen3[c3b] = true; products.push({ name: c3b, holder: '', status: 'Autoris\u00e9' }); }
             if (products.length >= 50) break;
           }
         }
-        beDebug['s2hits' + ci] = products.length;
+        beDebug['s3hits' + ci] = products.length;
       } catch(e) {
-        beDebug['s2err' + ci] = e.message;
+        beDebug['s3err' + ci] = e.message;
       }
     }
   }
 
-  // ── Strategy 3: SAM ZIP streaming (main fix: version param now correct) ──
+  // ── Strategy 4: FAGG/FAMHP medicines list ──
   if (products.length === 0) {
-    beDebug.s3start = 'v' + samVersion;
     try {
-      var zipProducts = await streamSamZip(substance, terms, beDebug, samVersion, 18000);
-      beDebug.s3hits = zipProducts.length;
+      var faggUrl = 'https://www.fagg.be/nl/menselijk_gebruik/geneesmiddelen/geneesmiddelen/lijst?title=' +
+        encodeURIComponent(substance) + '&combine=' + encodeURIComponent(substance);
+      beDebug.s4url = faggUrl;
+      var faggHtml = await fetchApiText(faggUrl, 10000, {
+        'Referer': 'https://www.fagg.be/',
+        'Accept': 'text/html,application/xhtml+xml,*/*'
+      });
+      beDebug.s4len = faggHtml.length;
+      beDebug.s4pre = faggHtml.substring(0, 600);
+      var seen4 = {};
+      // Extract product names from table cells and links
+      var re4a = /<(?:td|a)[^>]*>\s*([^<]{5,100})\s*<\/(?:td|a)>/gi;
+      var mm4;
+      while ((mm4 = re4a.exec(faggHtml)) !== null) {
+        var c4 = mm4[1].trim().replace(/\s+/g, ' ');
+        if (matchesTerms(c4, terms) && !seen4[c4]) { seen4[c4] = true; products.push({ name: c4, holder: '', status: 'Autoris\u00e9' }); }
+        if (products.length >= 50) break;
+      }
+      beDebug.s4hits = products.length;
+    } catch(e) {
+      beDebug.s4err = e.message;
+    }
+  }
+
+  // ── Strategy 5: SAM ZIP streaming (v14: 23s timeout, better diagnostics) ──
+  if (products.length === 0) {
+    beDebug.s5start = 'v' + samVersion;
+    try {
+      var zipProducts = await streamSamZip(substance, terms, beDebug, samVersion, 23000);
+      beDebug.s5hits = zipProducts.length;
       if (zipProducts.length > 0) products = zipProducts;
     } catch(e) {
-      beDebug.s3err = e.message;
+      beDebug.s5err = e.message;
     }
   }
 
