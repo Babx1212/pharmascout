@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PharmaScout - Analyse d'attractivit- pharmaceutique</title>
+<title>PharmaScout - Analyse d'attractivité pharmaceutique</title>
 <!-- CDN Libraries -->
 <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.2/css/bootstrap.min.css" rel="stylesheet">
 <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
@@ -599,7 +599,7 @@
         <div class="brand-icon">-</div>
         <div>
           <div class="brand-name">PharmaScout</div>
-          <div class="brand-sub">-valuation d'attractivit- - G-n-riques &amp; Biosimilaires</div>        </div>
+          <div class="brand-sub">Évaluation d'attractivité - Génériques &amp; Biosimilaires</div>        </div>
       </div>
       <span class="header-badge">Usage interne</span>
     </div>
@@ -614,7 +614,7 @@
   <div class="card">
     <div class="card-header-bar">
       <i class="bi bi-search"></i>
-      Param-tres d'analyse    </div>
+      Paramètres d'analyse    </div>
     <div class="card-body">
       <div class="row g-3">
 
@@ -645,7 +645,7 @@
 
         <!-- IQVIA upload -->
         <div class="col-md-6">
-          <label class="form-label">Donn-es march- <span class="opt">(optionnel - export IQVIA .xlsx)</span></label>
+          <label class="form-label">Données marché <span class="opt">(optionnel - export IQVIA .xlsx)</span></label>
           <div class="upload-zone" id="upload-zone"
                onclick="document.getElementById('iqvia-input').click()"
                ondragover="event.preventDefault()" ondrop="handleDrop(event)">
@@ -665,7 +665,7 @@
           <div class="collapse mt-3" id="weightsSection">
             <div class="weights-panel">
               <div class="weight-row">
-                <span class="weight-label">S-curit-</span>
+                <span class="weight-label">Sécurité</span>
                 <input type="range" id="w-safety" min="10" max="80" value="35" step="5" oninput="updateWeights()">
                 <span class="weight-value" id="w-safety-val">35%</span>
               </div>
@@ -675,7 +675,7 @@
                 <span class="weight-value" id="w-comp-val">35%</span>
               </div>
               <div class="weight-row">
-                <span class="weight-label">March-</span>
+                <span class="weight-label">Marché</span>
                 <input type="range" id="w-market" min="10" max="80" value="30" step="5" oninput="updateWeights()">
                 <span class="weight-value" id="w-market-val">30%</span>
               </div>
@@ -727,7 +727,7 @@
       <!-- Sub-scores -->
       <div class="score-sub-area">
         <div class="sub-kpi">
-          <span class="sub-kpi-label">S-curit-</span>
+          <span class="sub-kpi-label">Sécurité</span>
           <span class="sub-kpi-val" id="score-safety">-</span>
           <div class="sub-kpi-bar"><div class="sub-kpi-bar-fill" id="bar-safety"></div></div>
           <span class="sub-kpi-source">FAERS + PubMed</span>
@@ -739,10 +739,10 @@
           <span class="sub-kpi-source">Orange Book</span>
         </div>
         <div class="sub-kpi">
-          <span class="sub-kpi-label">March-</span>
+          <span class="sub-kpi-label">Marché</span>
           <span class="sub-kpi-val" id="score-market">-</span>
           <div class="sub-kpi-bar"><div class="sub-kpi-bar-fill" id="bar-market"></div></div>
-          <span class="sub-kpi-source" id="market-source-label">Estim-</span>
+          <span class="sub-kpi-source" id="market-source-label">Estimé</span>
         </div>
       </div>
 
@@ -758,12 +758,12 @@
       <ul class="nav nav-tabs" id="detailTabs">
         <li class="nav-item">
           <a class="nav-link active" data-bs-toggle="tab" href="#tab-safety">
-            <i class="bi bi-shield-exclamation"></i>S-curit-
+            <i class="bi bi-shield-exclamation"></i>Sécurité
           </a>
         </li>
         <li class="nav-item">
           <a class="nav-link" data-bs-toggle="tab" href="#tab-regulatory">
-            <i class="bi bi-building-check"></i>R-glementaire EU/CH
+            <i class="bi bi-building-check"></i>Réglementaire EU/CH
           </a>
         </li>
         <li class="nav-item">
@@ -773,19 +773,19 @@
         </li>
         <li class="nav-item">
           <a class="nav-link" data-bs-toggle="tab" href="#tab-market">
-            <i class="bi bi-graph-up"></i>March-
+            <i class="bi bi-graph-up"></i>Marché
           </a>
         </li>
         <li class="nav-item">
           <a class="nav-link" data-bs-toggle="tab" href="#tab-raw">
-            <i class="bi bi-database"></i>Donn-es
+            <i class="bi bi-database"></i>Données
           </a>
         </li>
       </ul>
 
       <div class="tab-content">
 
-        <!-- --- TAB: S-CURIT- --- -->
+        <!-- --- TAB: SÉCURITÉ --- -->
         <div class="tab-pane fade show active" id="tab-safety">
 
           <!-- KPIs row -->
@@ -800,7 +800,7 @@
             <div class="col">
               <div class="metric-box">
                 <div class="metric-value" id="m-deaths">-</div>
-                <div class="metric-label">D-c-s rapport-s</div>
+                <div class="metric-label">Décès rapportés</div>
                 <div class="metric-sub">FDA FAERS</div>
               </div>
             </div>
@@ -833,17 +833,17 @@
           </div>
 
           <!-- Signals & alerts -->
-          <div class="section-heading"><i class="bi bi-exclamation-triangle"></i>Alertes & signaux d-tect-s</div>
+          <div class="section-heading"><i class="bi bi-exclamation-triangle"></i>Alertes & signaux détectés</div>
           <div id="flags-container"></div>
 
           <!-- Top reactions -->
           <div id="reactions-section" style="display:none">
-            <div class="section-heading"><i class="bi bi-list-ol"></i>Top 10 effets ind-sirables (MedDRA PT) - FDA FAERS</div>
+            <div class="section-heading"><i class="bi bi-listéol"></i>Top 10 effets ind-sirables (MedDRA PT) - FDA FAERS</div>
             <div id="reactions-chart"></div>
           </div>
 
           <!-- PubMed -->
-          <div class="section-heading mt-3"><i class="bi bi-journals"></i>Litt-rature scientifique (PubMed)</div>
+          <div class="section-heading mt-3"><i class="bi bi-journals"></i>Littérature scientifique (PubMed)</div>
           <div class="row g-2">
             <div class="col-4">
               <div class="metric-box">
@@ -854,13 +854,13 @@
             <div class="col-4">
               <div class="metric-box">
                 <div class="metric-value" id="m-pubmed-safety">-</div>
-                <div class="metric-label">Publications s-curit-</div>
+                <div class="metric-label">Publications sécurité</div>
               </div>
             </div>
             <div class="col-4">
               <div class="metric-box">
                 <div class="metric-value" id="m-pubmed-recent">-</div>
-                <div class="metric-label">Publications r-centes</div>
+                <div class="metric-label">Publications récentes</div>
                 <div class="metric-sub">2023-2026</div>
               </div>
             </div>
@@ -868,7 +868,7 @@
 
           <!-- Regulatory overview (inline status) -->
           <div id="regulatory-overview" class="mt-3">
-            <div class="section-heading"><i class="bi bi-patch-check"></i>Aper-u r-glementaire</div>
+            <div class="section-heading"><i class="bi bi-patch-check"></i>Aper-u réglementaire</div>
             <div class="row g-2">
               <div class="col-4">
                 <div class="reg-mini" id="reg-fda-block">
@@ -900,11 +900,11 @@
         <div class="tab-pane fade" id="tab-regulatory">
 
           <!-- EMA SECTION -->
-          <div class="reg-source-tag"><i class="bi bi-building"></i>EMA - Union Europ-enne</div>
+          <div class="reg-source-tag"><i class="bi bi-building"></i>EMA - Union Européenne</div>
 
           <div id="ema-loading" style="text-align:center;padding:24px;color:var(--text-muted);display:none">
             <div class="spinner" style="width:28px;height:28px;margin:0 auto 10px"></div>
-            Interrogation des donn-es officielles EMA-
+            Interrogation des données officielles EMA-
           </div>
           <div id="ema-error" style="display:none" class="flag-item flag-warning">
             <i class="bi bi-exclamation-triangle"></i>
@@ -916,21 +916,21 @@
                 <div class="metric-box">
                   <div class="metric-value sm" id="m-ema-prac">-</div>
                   <div class="metric-label">Signal PRAC</div>
-                  <div class="metric-sub">Proc-dure s-curit- EU</div>
+                  <div class="metric-sub">Procédure sécurité EU</div>
                 </div>
               </div>
               <div class="col-4">
                 <div class="metric-box">
                   <div class="metric-value" id="m-ema-referrals">-</div>
                   <div class="metric-label">Referrals EMA</div>
-                  <div class="metric-sub">Total proc-dures</div>
+                  <div class="metric-sub">Total procédures</div>
                 </div>
               </div>
               <div class="col-4">
                 <div class="metric-box">
                   <div class="metric-value" id="m-ema-dhpc">-</div>
                   <div class="metric-label">DHPCs</div>
-                  <div class="metric-sub">Communications s-curit-</div>
+                  <div class="metric-sub">Communications sécurité</div>
                 </div>
               </div>
             </div>
@@ -938,12 +938,12 @@
             <div id="ema-prac-alert" style="display:none" class="flag-item flag-danger mb-2">
               <i class="bi bi-exclamation-circle-fill"></i>
               <div style="flex:1">
-                <div class="flag-label" id="ema-prac-alert-title">Proc-dure PRAC active d-tect-e</div>
+                <div class="flag-label" id="ema-prac-alert-title">Procédure PRAC active détectée</div>
                 <div class="flag-detail" id="ema-prac-alert-detail"></div>
                 <div id="ema-prac-meta" style="font-size:0.72rem;color:#b91c1c;margin-top:4px"></div>
                 <div id="ema-prac-alert-link" style="display:none;margin-top:4px">
                   <a id="ema-prac-link" href="#" target="_blank" style="color:var(--danger);font-size:0.78rem;font-weight:600">
-                    - Voir la proc-dure sur ema.europa.eu -
+                    - Voir la procédure sur ema.europa.eu -
                   </a>
                 </div>
               </div>
@@ -953,12 +953,12 @@
               <i class="bi bi-check-circle-fill"></i>
               <div>
                 <div class="flag-label" style="color:var(--success)">Aucun referral PRAC trouv-</div>
-                <div class="flag-detail">Aucune proc-dure de s-curit- EMA r-pertori-e pour cette substance.</div>
+                <div class="flag-detail">Aucune procédure de sécurité EMA r-pertori-e pour cette substance.</div>
               </div>
             </div>
 
             <div id="ema-all-referrals-section" style="display:none;margin-top:14px">
-              <div class="section-heading"><i class="bi bi-list-check"></i>Toutes les proc-dures EMA</div>
+              <div class="section-heading"><i class="bi bi-listécheck"></i>Toutes les procédures EMA</div>
               <div id="ema-all-referrals-list"></div>
             </div>
 
@@ -968,16 +968,16 @@
             </div>
 
             <div id="ema-products-section" style="display:none;margin-top:14px">
-              <div class="section-heading"><i class="bi bi-capsule"></i>Produits autoris-s (EMA - UE)</div>
+              <div class="section-heading"><i class="bi bi-capsule"></i>Produits autorisés (EMA - UE)</div>
               <table class="data-table">
-                <thead><tr><th>M-dicament</th><th>Titulaire AMM</th><th>Statut</th></tr></thead>
+                <thead><tr><th>Médicament</th><th>Titulaire AMM</th><th>Statut</th></tr></thead>
                 <tbody id="ema-products-body"></tbody>
               </table>
             </div>
 
             <div class="info-box mt-3">
               <i class="bi bi-info-circle"></i>
-              <strong>Source :</strong> EMA JSON Data Files officiels (mis - jour 2- par jour) -
+              <strong>Source :</strong> EMA JSON Data Files officiels (mis à jour 2- par jour) -
               <a id="ema-search-link" href="#" target="_blank" style="color:var(--accent)">Rechercher sur ema.europa.eu</a>
               &nbsp;-&nbsp;
               <a href="https://www.adrreports.eu" target="_blank" style="color:var(--accent)">EudraVigilance (ADRs EU)</a>
@@ -985,7 +985,7 @@
           </div>
 
           <div id="ema-pending" style="text-align:center;padding:24px;color:var(--text-muted)">
-            Lancez une analyse pour voir les donn-es EMA.
+            Lancez une analyse pour voir les données EMA.
           </div>
 
           <!-- DIVIDER -->
@@ -1007,8 +1007,8 @@
               <div class="col-4">
                 <div class="metric-box">
                   <div class="metric-value" id="m-swiss-total">-</div>
-                  <div class="metric-label">Produits autoris-s CH</div>
-                  <div class="metric-sub">March- suisse</div>
+                  <div class="metric-label">Produits autorisés CH</div>
+                  <div class="metric-sub">Marché suisse</div>
                 </div>
               </div>
               <div class="col-4">
@@ -1030,13 +1030,13 @@
             <div id="swiss-pv-alert" style="display:none" class="flag-item flag-warning mb-2">
               <i class="bi bi-bell-fill"></i>
               <div>
-                <div class="flag-label">Alerte pharmacovigilance Swissmedic d-tect-e</div>
-                <div class="flag-detail" id="swiss-pv-detail">Cette substance est mentionn-e dans les Vigilance News de Swissmedic.</div>
+                <div class="flag-label">Alerte pharmacovigilance Swissmedic détectée</div>
+                <div class="flag-detail" id="swiss-pv-detail">Cette substance est mentionnée dans les Vigilance News de Swissmedic.</div>
               </div>
             </div>
 
             <div id="swiss-products-section" style="display:none;margin-top:14px">
-              <div class="section-heading"><i class="bi bi-capsule"></i>Produits identifi-s (Swissmedic CH)</div>
+              <div class="section-heading"><i class="bi bi-capsule"></i>Produits identifiés (Swissmedic CH)</div>
               <table class="data-table">
                 <thead><tr><th>Nom du produit</th><th>Titulaire AMM</th></tr></thead>
                 <tbody id="swiss-products-body"></tbody>
@@ -1053,7 +1053,7 @@
             </div>
           </div>
           <div id="swiss-pending" style="text-align:center;padding:24px;color:var(--text-muted)">
-            Lancez une analyse pour voir les donn-es Swissmedic.
+            Lancez une analyse pour voir les données Swissmedic.
           </div>
 
         </div><!-- /tab-regulatory -->
@@ -1065,7 +1065,7 @@
             <div class="col-4">
               <div class="metric-box">
                 <div class="metric-value" id="m-generics">-</div>
-                <div class="metric-label">G-n-riques approuv-s</div>
+                <div class="metric-label">Génériques approuv-s</div>
                 <div class="metric-sub">FDA (ANDAs)</div>
               </div>
             </div>
@@ -1086,15 +1086,15 @@
 
           <!-- FDA manufacturers -->
           <div id="manufacturers-section" style="display:none">
-            <div class="section-heading"><i class="bi bi-buildings"></i>Fabricants identifi-s (FDA Orange Book)</div>
+            <div class="section-heading"><i class="bi bi-buildings"></i>Fabricants identifiés (FDA Orange Book)</div>
             <div id="manufacturers-list"></div>
           </div>
 
           <!-- EU Products by territory -->
-          <div class="section-heading mt-3"><i class="bi bi-globe-europe-africa"></i>March-s europ-ens</div>
+          <div class="section-heading mt-3"><i class="bi bi-globe-europe-africa"></i>Marchés européens</div>
           <div id="eu-products-loading" style="text-align:center;padding:16px;color:var(--text-muted);display:none">
             <div class="spinner" style="width:24px;height:24px;margin:0 auto 8px"></div>
-            Interrogation des bases europ-ennes-
+            Interrogation des bases européennes-
           </div>
           <div id="eu-products-error" style="display:none" class="flag-item flag-warning">
             <i class="bi bi-exclamation-triangle"></i>
@@ -1104,57 +1104,57 @@
             <div id="eu-territory-groups"></div>
           </div>
           <div id="eu-products-pending" style="padding:12px 14px;background:#fafbfc;border-radius:var(--radius);border:1px solid var(--border);font-size:0.82rem;color:var(--text-muted)">
-            Lancez une analyse pour voir les donn-es europ-ennes.
+            Lancez une analyse pour voir les données européennes.
           </div>
 
           <div class="info-box mt-3">
             <i class="bi bi-info-circle"></i>
-            Donn-es FDA : <strong>FDA Orange Book</strong> (march- am-ricain).
-            Donn-es EU : bases officielles FR, ES, PT, BE.
+            Données FDA : <strong>FDA Orange Book</strong> (marché am-ricain).
+            Données EU : bases officielles FR, ES, PT, BE.
           </div>
         </div><!-- /tab-comp -->
 
-        <!-- --- TAB: MARCH- --- -->
+        <!-- --- TAB: MARCHÉ --- -->
         <div class="tab-pane fade" id="tab-market">
           <div id="market-no-data" style="text-align:center;padding:36px 20px;color:var(--text-muted)">
             <i class="bi bi-file-earmark-excel" style="font-size:2.5rem;display:block;margin-bottom:12px;opacity:0.4"></i>
-            <div style="font-weight:600;margin-bottom:6px;color:var(--text)">Aucune donn-e march- fournie</div>
+            <div style="font-weight:600;margin-bottom:6px;color:var(--text)">Aucune donnée marché fournie</div>
             <div style="font-size:0.85rem;max-width:400px;margin:0 auto">
-              Uploadez un export IQVIA (.xlsx) pour obtenir un score march- bas- sur vos donn-es r-elles.
+              Uploadez un export IQVIA (.xlsx) pour obtenir un score marché bas- sur vos données r-elles.
             </div>
             <div class="info-box mt-3" style="max-width:360px;margin:16px auto 0;text-align:left">
               <i class="bi bi-info-circle"></i>
-              Score march- actuel : <strong>5.0 / 10 (neutre)</strong> - ne p-nalise pas l'analyse            </div>
+              Score marché actuel : <strong>5.0 / 10 (neutre)</strong> - ne p-nalise pas l'analyse            </div>
           </div>
           <div id="market-data-section" style="display:none">
             <div class="row g-2 mb-3">
               <div class="col-6">
                 <div class="metric-box">
                   <div class="metric-value" id="m-mkt-value">-</div>
-                  <div class="metric-label">Valeur totale du march-</div>
+                  <div class="metric-label">Valeur totale du marché</div>
                   <div class="metric-sub">CHF (source IQVIA)</div>
                 </div>
               </div>
               <div class="col-6">
                 <div class="metric-box">
                   <div class="metric-value" id="m-mkt-growth">-</div>
-                  <div class="metric-label">Croissance march- (moy.)</div>
+                  <div class="metric-label">Croissance marché (moy.)</div>
                   <div class="metric-sub">source IQVIA</div>
                 </div>
               </div>
             </div>
             <div id="market-warnings"></div>
             <div id="top-products-section" style="display:none">
-              <div class="section-heading"><i class="bi bi-trophy"></i>Top produits du march-</div>
+              <div class="section-heading"><i class="bi bi-trophy"></i>Top produits du marché</div>
               <table class="data-table">
                 <thead><tr><th>Produit</th><th style="text-align:right">Valeur (CHF)</th></tr></thead>
                 <tbody id="top-products-body"></tbody>
               </table>
             </div>
             <div id="detected-cols-section" class="mt-3">
-              <div class="section-heading"><i class="bi bi-table"></i>Colonnes d-tect-es automatiquement</div>
+              <div class="section-heading"><i class="bi bi-table"></i>Colonnes détectées automatiquement</div>
               <table class="data-table">
-                <thead><tr><th>Cat-gorie</th><th>Colonne Excel d-tect-e</th></tr></thead>
+                <thead><tr><th>Cat-gorie</th><th>Colonne Excel détectée</th></tr></thead>
                 <tbody id="detected-cols-body"></tbody>
               </table>
             </div>
@@ -1166,9 +1166,9 @@
           <div style="font-size:0.82rem">
             <div class="section-heading"><i class="bi bi-shield-check"></i>FDA FAERS - Effets ind-sirables</div>
             <pre id="raw-faers" style="background:#f8fafc;border-radius:var(--radius);padding:12px;font-size:0.72rem;max-height:180px;overflow:auto;border:1px solid var(--border);color:var(--text-muted)"></pre>
-            <div class="section-heading mt-2"><i class="bi bi-capsule"></i>FDA Orange Book - G-n-riques</div>
+            <div class="section-heading mt-2"><i class="bi bi-capsule"></i>FDA Orange Book - Génériques</div>
             <pre id="raw-generics" style="background:#f8fafc;border-radius:var(--radius);padding:12px;font-size:0.72rem;max-height:180px;overflow:auto;border:1px solid var(--border);color:var(--text-muted)"></pre>
-            <div class="section-heading mt-2"><i class="bi bi-journals"></i>PubMed NCBI - Litt-rature</div>
+            <div class="section-heading mt-2"><i class="bi bi-journals"></i>PubMed NCBI - Littérature</div>
             <pre id="raw-pubmed" style="background:#f8fafc;border-radius:var(--radius);padding:12px;font-size:0.72rem;max-height:180px;overflow:auto;border:1px solid var(--border);color:var(--text-muted)"></pre>
           </div>
         </div><!-- /tab-raw -->
@@ -1303,7 +1303,7 @@ async function fetchEUProducts(substance) {
     hide('eu-products-loading');
     show('eu-products-error');
     document.getElementById('eu-products-error-text').textContent =
-      `Donn-es EU indisponibles : ${e.message}`;
+      `Données EU indisponibles : ${e.message}`;
   }
 }
 
@@ -1338,19 +1338,19 @@ function renderEUProducts(results) {
     if (data.error && items.length === 0) {
       html += `<div class="flag-item flag-secondary" style="margin:0 0 4px">
         <i class="bi bi-info-circle"></i>
-        <span style="font-size:0.78rem;color:var(--text-muted)">${data.error.includes('timeout') ? 'D-lai d-pass- - donn-es temporairement indisponibles' : 'Source indisponible : ' + data.error}</span>
+        <span style="font-size:0.78rem;color:var(--text-muted)">${data.error.includes('timeout') ? 'D-lai d-pass- - données temporairement indisponibles' : 'Source indisponible : ' + data.error}</span>
       </div>`;
     } else if (items.length === 0) {
       html += `<div style="padding:8px 12px;font-size:0.78rem;color:var(--text-muted)">
-        Aucun produit identifi- sur ce march-.
+        Aucun produit identifié sur ce marché.
       </div>`;
     } else {
-      html += `<table class="data-table" style="margin-bottom:0"><thead><tr><th>M-dicament</th><th>Titulaire</th><th>Statut</th></tr></thead><tbody>`;
+      html += `<table class="data-table" style="margin-bottom:0"><thead><tr><th>Médicament</th><th>Titulaire</th><th>Statut</th></tr></thead><tbody>`;
       items.slice(0, 12).forEach(p => {
-        html += `<tr><td>${p.name||'-'}</td><td style="color:var(--text-muted)">${p.holder||'-'}</td><td style="color:var(--text-muted)">${p.status||'Autoris-'}</td></tr>`;
+        html += `<tr><td>${p.name||'-'}</td><td style="color:var(--text-muted)">${p.holder||'-'}</td><td style="color:var(--text-muted)">${p.status||'Autorisé'}</td></tr>`;
       });
       if (items.length > 12) {
-        html += `<tr><td colspan="3" style="color:var(--text-subtle);font-size:0.72rem;text-align:center">+${items.length - 12} produits suppl-mentaires</td></tr>`;
+        html += `<tr><td colspan="3" style="color:var(--text-subtle);font-size:0.72rem;text-align:center">+${items.length - 12} produits supplémentaires</td></tr>`;
       }
       html += `</tbody></table>`;
     }
@@ -1413,7 +1413,7 @@ function triggerRxNorm(val) {
     return;
   }
 
-  // Apr-s 400ms sans frappe : cherche suggestions + correction
+  // Après 400ms sans frappe : cherche suggestions + correction
   rxnormTimer = setTimeout(() => fetchRxNormSuggestions(trimmed), 400);
 }
 
@@ -1434,13 +1434,13 @@ async function fetchRxNormSuggestions(term) {
     const inputVal = document.getElementById('substance-input').value.trim().toLowerCase();
     const firstSuggestion = suggestions[0].toLowerCase();
 
-    // Si la premi-re suggestion diff-re de ce que l'utilisateur a tap- -- correction
+    // Si la première suggestion diff-re de ce que l'utilisateur a tapé -- correction
     if (firstSuggestion !== inputVal) {
       currentSuggestion = suggestions[0];
       document.getElementById('rxnorm-suggestion-text').textContent = suggestions[0];
       document.getElementById('rxnorm-suggestion').style.display = 'block';
     } else {
-      // Nom d-j- correct -- badge valid-
+      // Nom déjà correct -- badge validé
       document.getElementById('rxnorm-validated-text').textContent = suggestions[0];
       document.getElementById('rxnorm-validated').style.display = 'block';
       currentSuggestion = suggestions[0];
@@ -1514,7 +1514,7 @@ function updateWeights() {
   const el = document.getElementById('weight-status');
   if (Math.abs(total - 100) > 5) {
     el.className = 'weight-warning';
-    el.textContent = `---- Somme : ${total}% (sera normalis-e automatiquement)`;
+    el.textContent = `---- Somme : ${total}% (sera normalisée automatiquement)`;
   } else {
     el.className = 'weight-ok';
     el.textContent = `-- Somme des poids : ${total}%`;
@@ -1659,11 +1659,11 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 const COL_KEYWORDS = {
   market_value: ['chiffre','vente','value','valeur','ca ','c.a.','revenue','sales','umsatz','chf','eur','usd','montant','amount'],
-  volume: ['volume','unit-','unite','units','bo-te','boite','pack','quantity','quantit-','pieces'],
-  market_share: ['part de march-','market share','share','part','anteil','quota','ms%'],
+  volume: ['volume','unité','unite','units','bo-te','boite','pack','quantity','quantité','pieces'],
+  market_share: ['part de marché','market share','share','part','anteil','quota','ms%'],
   growth: ['croissance','growth','variation','trend','evol','wachstum','change','delta','vs','yoy'],
   product: ['produit','product','nom','name','bezeichnung','article','molecule','brand','marque'],
-  period: ['p-riode','period','mois','month','ann-e','year','date','datum','quarter','trimestre']
+  period: ['période','period','mois','month','année','year','date','datum','quarter','trimestre']
 };
 
 function detectColumn(headers, category) {
@@ -1722,8 +1722,8 @@ async function parseIQVIA(file) {
         }
 
         const warnings = [];
-        if (!detected.market_value) warnings.push('Colonne valeur march- non d-tect-e automatiquement');
-        if (!detected.product) warnings.push('Colonne produit non d-tect-e automatiquement');
+        if (!detected.market_value) warnings.push('Colonne valeur marché non détectée automatiquement');
+        if (!detected.product) warnings.push('Colonne produit non détectée automatiquement');
 
         resolve({
           parseSuccess: true,
@@ -1758,25 +1758,25 @@ function calcSafety(faers, pubmed) {
     const sRate = serious / total;
     const dRate = deaths / total;
 
-    if (sRate > 0.70) { score -= 2.5; flags.push({level:'danger', emoji:'--', text:'Taux d\'-v-nements graves tr-s -lev-', detail: pct(sRate) + ' des rapports'}); }
+    if (sRate > 0.70) { score -= 2.5; flags.push({level:'danger', emoji:'--', text:'Taux d\'-v-nements graves très -lev-', detail: pct(sRate) + ' des rapports'}); }
     else if (sRate > 0.50) { score -= 1.5; flags.push({level:'warning', emoji:'--', text:'Taux d\'-v-nements graves -lev-', detail: pct(sRate) + ' des rapports'}); }
-    else if (sRate > 0.30) { score -= 0.75; flags.push({level:'info', emoji:'--', text:'Taux d\'-v-nements graves mod-r-', detail: pct(sRate) + ' des rapports'}); }
+    else if (sRate > 0.30) { score -= 0.75; flags.push({level:'info', emoji:'--', text:'Taux d\'-v-nements graves modéré', detail: pct(sRate) + ' des rapports'}); }
 
-    if (dRate > 0.10) { score -= 2.0; flags.push({level:'danger', emoji:'--', text:'Taux de d-c-s rapport-s -lev-', detail: pct(dRate) + ' des rapports'}); }
-    else if (dRate > 0.05) { score -= 1.0; flags.push({level:'warning', emoji:'--', text:'Taux de d-c-s rapport-s notable', detail: pct(dRate) + ' des rapports'}); }
-    else if (dRate > 0.01) { score -= 0.5; flags.push({level:'info', emoji:'--', text:'D-c-s rapport-s -- - surveiller', detail: pct(dRate) + ' des rapports'}); }
+    if (dRate > 0.10) { score -= 2.0; flags.push({level:'danger', emoji:'--', text:'Taux de décès rapportés -lev-', detail: pct(dRate) + ' des rapports'}); }
+    else if (dRate > 0.05) { score -= 1.0; flags.push({level:'warning', emoji:'--', text:'Taux de décès rapportés notable', detail: pct(dRate) + ' des rapports'}); }
+    else if (dRate > 0.01) { score -= 0.5; flags.push({level:'info', emoji:'--', text:'Décès rapportés -- - surveiller', detail: pct(dRate) + ' des rapports'}); }
 
-    if (total > 100000) { score -= 0.75; flags.push({level:'info', emoji:'--', text:'Volume tr-s -lev- de rapports FAERS', detail: fmt(total) + ' cas cumul-s'}); }
-    else if (total > 50000) { score -= 0.25; flags.push({level:'info', emoji:'--', text:'Volume -lev- de rapports FAERS', detail: fmt(total) + ' cas cumul-s'}); }
+    if (total > 100000) { score -= 0.75; flags.push({level:'info', emoji:'--', text:'Volume très -lev- de rapports FAERS', detail: fmt(total) + ' cas cumulés'}); }
+    else if (total > 50000) { score -= 0.25; flags.push({level:'info', emoji:'--', text:'Volume -lev- de rapports FAERS', detail: fmt(total) + ' cas cumulés'}); }
   } else {
-    flags.push({level:'secondary', emoji:'--', text:'Aucun rapport FAERS trouv-', detail:'Substance nouvelle ou donn-es insuffisantes dans la base FDA'});
+    flags.push({level:'secondary', emoji:'--', text:'Aucun rapport FAERS trouvé', detail:'Substance nouvelle ou données insuffisantes dans la base FDA'});
   }
 
   const recent = pubmed.recentSafetyPublications;
-  if (recent > 150) { score -= 1.5; flags.push({level:'danger', emoji:'--', text:'Activit- s-curit- tr-s forte dans la litt-rature r-cente', detail: recent + ' publications (2023-2026) -- possible signal actif'}); }
-  else if (recent > 75) { score -= 0.75; flags.push({level:'warning', emoji:'--', text:'Activit- s-curit- notable dans la litt-rature r-cente', detail: recent + ' publications (2023-2026)'}); }
+  if (recent > 150) { score -= 1.5; flags.push({level:'danger', emoji:'--', text:'Activité sécurité très forte dans la littérature récente', detail: recent + ' publications (2023-2026) -- possible signal actif'}); }
+  else if (recent > 75) { score -= 0.75; flags.push({level:'warning', emoji:'--', text:'Activité sécurité notable dans la littérature récente', detail: recent + ' publications (2023-2026)'}); }
   else if (recent > 30) { score -= 0.25; flags.push({level:'info',
- emoji:'--', text:'Activit- s-curit- mod-r-e dans la litt-rature r-cente', detail: recent + ' publications (2023-2026)'}); }
+ emoji:'--', text:'Activité sécurité modérée dans la littérature récente', detail: recent + ' publications (2023-2026)'}); }
 
   score = Math.max(0, Math.min(10, Math.round(score * 10) / 10));
   return {
@@ -1793,18 +1793,18 @@ function calcSafety(faers, pubmed) {
 function calcCompetition(gen) {
   const n = gen.genericApprovals;
   let score, level, emoji;
-  if (n === 0)       { score=9.0; level='March- non encore g-n-rifi- (FDA)'; emoji='--'; }
-  else if (n <= 2)   { score=8.0; level='Tr-s peu de concurrents g-n-riques'; emoji='--'; }
-  else if (n <= 5)   { score=6.5; level='Concurrence mod-r-e'; emoji='--'; }
-  else if (n <= 10)  { score=4.5; level='March- comp-titif'; emoji='--'; }
-  else if (n <= 20)  { score=2.5; level='March- tr-s comp-titif'; emoji='--'; }
-  else               { score=1.0; level='March- satur- -- nombreux g-n-riques'; emoji='--'; }
+  if (n === 0)       { score=9.0; level='Marché non encore générifié (FDA)'; emoji='--'; }
+  else if (n <= 2)   { score=8.0; level='Très peu de concurrents génériques'; emoji='--'; }
+  else if (n <= 5)   { score=6.5; level='Concurrence modérée'; emoji='--'; }
+  else if (n <= 10)  { score=4.5; level='Marché compétitif'; emoji='--'; }
+  else if (n <= 20)  { score=2.5; level='Marché très compétitif'; emoji='--'; }
+  else               { score=1.0; level='Marché saturé -- nombreux génériques'; emoji='--'; }
   return { score, n, nda: gen.ndaApprovals, level, emoji, manufacturers: gen.manufacturers };
 }
 
 function calcMarket(iqvia) {
   if (!iqvia || !iqvia.parseSuccess) {
-    return { score:5.0, source:'estim-', message:'Score neutre -- pas de donn-es IQVIA' };
+    return { score:5.0, source:'estimé', message:'Score neutre -- pas de données IQVIA' };
   }
   let score = 5.0;
   const val = iqvia.totalMarketValueCHF;
@@ -1834,10 +1834,10 @@ function calcComposite(safety, comp, market, ws, wc, wm) {
   ws /= total; wc /= total; wm /= total;
   const score = Math.round((safety.score*ws + comp.score*wc + market.score*wm) * 10) / 10;
   let rec, recColor, recDetail;
-  if (score >= 7.5)      { rec='-- RECOMMAND--';        recColor='#10b981'; recDetail='Profil d\'investissement attractif'; }
-  else if (score >= 5.5) { rec='---- - -VALUER';         recColor='#f59e0b'; recDetail='Potentiel mod-r- -- approfondissement recommand-'; }
-  else if (score >= 3.5) { rec='-- PRUDENCE';           recColor='#f97316'; recDetail='Facteurs de risque significatifs identifi-s'; }
-  else                   { rec='-- NON RECOMMAND-';     recColor='#ef4444'; recDetail='Rapport b-n-fice/risque d\'investissement d-favorable'; }
+  if (score >= 7.5)      { rec='-- RECOMMANDÉ-';        recColor='#10b981'; recDetail='Profil d\'investissement attractif'; }
+  else if (score >= 5.5) { rec='---- - ÉVALUER';         recColor='#f59e0b'; recDetail='Potentiel modéré -- approfondissement recommandé'; }
+  else if (score >= 3.5) { rec='-- PRUDENCE';           recColor='#f97316'; recDetail='Facteurs de risque significatifs identifiés'; }
+  else                   { rec='-- NON RECOMMANDÉ';     recColor='#ef4444'; recDetail='Rapport bénéfice/risque d\'investissement défavorable'; }
   return { score, rec, recColor, recDetail };
 }
 
@@ -1855,7 +1855,7 @@ function renderResults() {
   document.getElementById('score-number').textContent = cp.score;
   document.getElementById('score-rec').textContent = cp.rec;
   document.getElementById('score-detail').textContent = cp.recDetail;
-  document.getElementById('score-date').textContent = 'Analys- le ' + new Date().toLocaleDateString('fr-CH') + ' - ' + new Date().toLocaleTimeString('fr-CH', {hour:'2-digit', minute:'2-digit'});
+  document.getElementById('score-date').textContent = 'Analysé le ' + new Date().toLocaleDateString('fr-CH') + ' - ' + new Date().toLocaleTimeString('fr-CH', {hour:'2-digit', minute:'2-digit'});
 
   // Sub-scores
   ['safety', 'comp', 'market'].forEach((key, i) => {
@@ -1870,7 +1870,7 @@ function renderResults() {
     bar.className = 'sub-kpi-bar-fill';
     bar.style.backgroundColor = col;
   });
-  document.getElementById('market-source-label').textContent = ms.source === 'IQVIA' ? 'Source IQVIA' : 'Score estim-';
+  document.getElementById('market-source-label').textContent = ms.source === 'IQVIA' ? 'Source IQVIA' : 'Score estimé';
 
   // Radar chart
   if (state.radarChart) state.radarChart.destroy();
@@ -1879,7 +1879,7 @@ function renderResults() {
 
     type: 'radar',
     data: {
-      labels: ['S-curit-', 'Concurrence', 'March-'],
+      labels: ['Sécurité', 'Concurrence', 'Marché'],
       datasets: [{
         data: [sf.score, cs.score, ms.score],
         fill: true,
@@ -1931,7 +1931,7 @@ function renderResults() {
   // Flags
   const flagsEl = document.getElementById('flags-container');
   if (sf.flags.length === 0) {
-    flagsEl.innerHTML = '<div style="color:#10b981; font-weight:600">-- Aucun signal de s-curit- majeur d-tect- dans les sources publiques analys-es.</div>';
+    flagsEl.innerHTML = '<div style="color:#10b981; font-weight:600">-- Aucun signal de sécurité majeur détecté dans les sources publiques analysées.</div>';
   } else {
     flagsEl.innerHTML = sf.flags.map(f => `
       <div class="flag-item flag-${f.level}">
@@ -1948,7 +1948,7 @@ function renderResults() {
   if (document.getElementById('reg-fda-status'
 )) {
     const _fda = sf.score < 5
-      ? { text: '---- Signaux d-tect-s', color: '#ef4444', detail: fmt(faers.totalReports) + ' rapports FAERS' }
+      ? { text: '---- Signaux détectés', color: '#ef4444', detail: fmt(faers.totalReports) + ' rapports FAERS' }
       : { text: '-- Profil acceptable', color: '#10b981', detail: fmt(faers.totalReports) + ' rapports FAERS' };
     document.getElementById('reg-fda-status').textContent = _fda.text;
     document.getElementById('reg-fda-status').style.color = _fda.color;
@@ -1992,7 +1992,7 @@ div>`).join('');
     if (ms.detectedColumns) {
       document.getElementById('detected-cols-body').innerHTML = Object.entries(ms.detectedColumns
 ).map(([k,v]) =>
-        `<tr><td>${k}</td><td>${v ? '-- ' + v : '-- Non d-tect-e'}</td></tr>`
+        `<tr><td>${k}</td><td>${v ? '-- ' + v : '-- Non détectée'}</td></tr>`
       ).join('');
     }
   }
@@ -2038,10 +2038,10 @@ async function analyze() {
     setLoading(true, '-- FDA FAERS -- effets ind-sirables--', 15);
     state.faers = await fetchFAERS(substance);
 
-    setLoading(true, '-- FDA Orange Book -- g-n-riques approuv-s--', 40);
+    setLoading(true, '-- FDA Orange Book -- génériques approuv-s--', 40);
     state.generics = await fetchGenerics(substance);
 
-    setLoading(true, '-- PubMed -- litt-rature scientifique--', 62);
+    setLoading(true, '-- PubMed -- littérature scientifique--', 62);
     state.pubmed = await fetchPubMed(substance);
 
     state.iqvia = null;
@@ -2050,11 +2050,11 @@ async function analyze() {
       state.iqvia = await parseIQVIA(iqviaFile);
     }
 
-    // Lancer EMA + Swissmedic en parall-le (en arri-re-plan, sans bloquer l'affichage)
+    // Lancer EMA + Swissmedic en parall-le (en arrière-plan, sans bloquer l'affichage)
     setLoading(true, '-- Interrogation EMA & Swissmedic--', 85);
-    fetchEMA(substance);      // async, met - jour les onglets EMA quand pr-t
+    fetchEMA(substance);      // async, met à jour les onglets EMA quand prêt
     fetchSwissmedic(substance); // async
-    fetchEUProducts(substance);  // async, updates EU territory groups, met - jour l'onglet Swissmedic quand pr-t
+    fetchEUProducts(substance);  // async, updates EU territory groups, met à jour l'onglet Swissmedic quand prêt
     setLoading(true, '-- Calcul des scores--', 95);
     await sleep(200);
 
@@ -2094,10 +2094,10 @@ function exportReport() {
 // ----------------------------------------
 --           PHARMASCOUT -- RAPPORT D'ANALYSE               --// ------------------------------------------------------------------------------------------------------------------------
 
-Substance analys-e  : ${substance.toUpperCase()}
-Date d'analyse      : ${now}Source march-       : ${ms.source === 'IQVIA' ? 'IQVIA (fichier fourni)' : 'Score estim- (pas de donn-es IQVIA)'}
+Substance analysée  : ${substance.toUpperCase()}
+Date d'analyse      : ${now}Source marché       : ${ms.source === 'IQVIA' ? 'IQVIA (fichier fourni)' : 'Score estimé (pas de données IQVIA)'}
 // --------------------------------------------------------------------------------------------------------------------
-SCORE COMPOSITE     : ${cp.score} / 10RECOMMANDATION      : ${cp.rec}
+SCORE COMPOSÉITE     : ${cp.score} / 10RECOMMANDATION      : ${cp.rec}
                       ${cp.recDetail}
 // --------------------------------------------------------------------------------------------------------------------
 
@@ -2105,39 +2105,39 @@ SCORES D-TAILL-S
   ----  S-
 curit-     : ${sf.score} / 10
   ----  Concurrence  : ${cs.score} / 10
-  --  March-       : ${ms.score} / 10 (${ms.source})
+  --  Marché       : ${ms.score} / 10 (${ms.source})
 
 // --------------------------------------------------------------------------------------------------------------------
-DONN-ES S-CURIT- (FDA FAERS)
+DONN-ES SÉCURITÉ (FDA FAERS)
   Total rapports      : ${fmt(faers.totalReports)}
-  Rapports s-rieux    : ${fmt(faers.seriousReports)} (${faers.totalReports > 0 ? pct(sf.details.seriousRate) : 
+  Rapports sérieux    : ${fmt(faers.seriousReports)} (${faers.totalReports > 0 ? pct(sf.details.seriousRate) : 
 'N/A'})
-  D-c-s rapport-s     : ${fmt(faers.deathReports)} (${faers.totalReports > 0 ? pct(sf.details.deathRate) : 'N/A'})
+  Décès rapportés     : ${fmt(faers.deathReports)} (${faers.totalReports > 0 ? pct(sf.details.deathRate) : 'N/A'})
 
 ALERTES D-TECT-ES
-${sf.flags.length === 0 ? '  Aucune alerte majeure d-tect-e.' : sf.flags.map(f => `  ${f.emoji} ${f.text} -- ${f.detail}`).join('\n')}
+${sf.flags.length === 0 ? '  Aucune alerte majeure détectée.' : sf.flags.map(f => `  ${f.emoji} ${f.text} -- ${f.detail}`).join('\n')}
 
 LITT-RATURE (PubMed)
-  Publications s-curit-    : ${fmt(pubmed.safetyPublications)}
-  Publications r-centes    : ${fmt(pubmed.recentSafetyPublications)} (2023-2026)
+  Publications sécurité    : ${fmt(pubmed.safetyPublications)}
+  Publications récentes    : ${fmt(pubmed.recentSafetyPublications)} (2023-2026)
 
 // -----------------------------
 // --------------------------------------------------------------------------------------
 CONCURRENCE (FDA Orange Book)
-  G-n-riques approuv-s     : ${cs.n} (ANDAs)
+  Génériques approuv-s     : ${cs.n} (ANDAs)
   Produits originaux       : ${cs.nda} (NDAs)
   Niveau de concurrence    : ${cs.level}
-  Fabricants identifi-s    : ${cs.manufacturers.length > 0 ? cs.manufacturers.join(', ') : 'N/A'}
+  Fabricants identifiés    : ${cs.manufacturers.length > 0 ? cs.manufacturers.join(', ') : 'N/A'}
 
 // ---------------------------------------------------------------------
 // ----------------------------------------------
-MARCH-
+MARCHÉ
 ${ms.source === 'IQVIA' ? `  Valeur totale (CHF)      : ${fmt(Math.round(ms.totalMarketValueCHF))}
-  Croissance              : ${ms.marketGrowthPct >= 0 ? '+' : ''}${ms.marketGrowthPct.toFixed(1)}%` : '  Score neutre appliqu- (donn-es IQVIA non fournies)'}
+  Croissance              : ${ms.marketGrowthPct >= 0 ? '+' : ''}${ms.marketGrowthPct.toFixed(1)}%` : '  Score neutre appliqu- (données IQVIA non fournies)'}
 
 // -----------------------------------------------------------------------------------------------------------
 // --------
-G-n-r- par PharmaScout -- Usage interne uniquement.
+Généré par PharmaScout -- Usage interne uniquement.
 Sources : FDA FAERS - FDA Orange Book - PubMed NCBI${ms.source === 'IQVIA' ? ' - IQVIA' : ''}
 Ne constitue pas un conseil d'investissement.// --------------------------------------------------------------------------------------------------------------------
 `.trim();
@@ -2169,7 +2169,7 @@ async function fetchEMA(substance) {
     hide('ema-loading');
     show('ema-error');
     document.getElementById('ema-error-text').textContent =
-      `Donn-es EMA indisponibles : ${e.message}. Consultez directement ema.europa.eu`;
+      `Données EMA indisponibles : ${e.message}. Consultez directement ema.europa.eu`;
   }
 }
 
@@ -2203,14 +2203,14 @@ function renderEMA(d) {
     hide('ema-no-prac');
 
     document.getElementById('ema-prac-alert-title').textContent =
-      d.pracDetails || 'Proc-dure PRAC / signal de s-curit- d-tect-';
+      d.pracDetails || 'Procédure PRAC / signal de sécurité détecté';
 
-    // D-tail contextuel
+    // Détail contextuel
     const parts = [];
     if (d.pracType)           parts.push(d.pracType);
     if (d.pracStatus)         parts.push('Statut : ' + d.pracStatus);
     if (d.pracRecommendation) parts.push('Recommandation : ' + d.pracRecommendation);
-    if (d.pracDecisionDate)   parts.push('D-cision CE : ' + d.pracDecisionDate);
+    if (d.pracDecisionDate)   parts.push('Décision CE : ' + d.pracDecisionDate);
     document.getElementById('ema-prac-alert-detail').textContent = parts.join(' - ');
 
     // INN (substances actives)
@@ -2251,7 +2251,7 @@ function renderEMA(d) {
           </div>
           <div class="flag-detail" style="font-size:0.78rem">
             ${[r.type, r.status, r.recommendation ? 'Recommandation : ' + r.recommendation : ''].filter(Boolean).join(' - ')}
-            ${r.decisionDate ? `<span style="margin-left:6px;color:#888">- D-cision : ${r.decisionDate}</span>` : ''}
+            ${r.decisionDate ? `<span style="margin-left:6px;color:#888">- Décision : ${r.decisionDate}</span>` : ''}
           </div>
         </div>
       </div>
@@ -2287,7 +2287,7 @@ show('ema-dhpc-section');
   document.getElementById('ema-search-link').href =
     d.searchUrl || `https://www.ema.europa.eu/en/search?search_api_fulltext=${encodeURIComponent(d.substance)}`;
 
-  // ---- Injecter signal EMA dans l'onglet S-curit- ----    // Produits EMA
+  // ---- Injecter signal EMA dans l'onglet Sécurité ----    // Produits EMA
   if (d.products && d.products.length > 0) {
     show('ema-products-section');
     document.getElementById('ema-products-body').innerHTML = d.products.map(p =>
@@ -2298,8 +2298,8 @@ show('ema-dhpc-section');
 }
 
 /**
- * Ajoute les signaux EMA dans le flags-container de l'onglet S-curit- * pour que l'overview ne soit pas uniquement
- bas- sur les donn-es FDA.
+ * Ajoute les signaux EMA dans le flags-container de l'onglet Sécurité * pour que l'overview ne soit pas uniquement
+ bas- sur les données FDA.
  */
 function injectEmaFlagsIntoSafety(d) {
   const container = document.getElementById('flags-container');
@@ -2309,7 +2309,7 @@ function injectEmaFlagsIntoSafety(d) {
 
   const fragments = [];
 
-  // Signal PRAC de s-curit-
+  // Signal PRAC de sécurité
   if (d.pracActive && d.isSafetyReferral) {
     const ref = (d.allReferrals || [])[0] || {};
     const urlPart = d.pracUrl
@@ -2318,10 +2318,10 @@ function injectEmaFlagsIntoSafety(d) {
     fragments.push(`
       <div class="flag-item flag-danger ema-flag-injected">
         ----- <div>
-          <div class="flag-label">Signal de s-curit- EMA/PRAC : ${d.pracDetails || 'Referral PRAC d-tect-'}</div>
+          <div class="flag-label">Signal de sécurité EMA/PRAC : ${d.pracDetails || 'Referral PRAC détecté'}</div>
           <div class="flag-detail">
             ${[d.pracType, d.pracStatus, d.pracRecommendation ? 'Reco : ' + d.pracRecommendation : ''].filter(Boolean).join(' - ')}
-            ${d.pracDecisionDate ? ' - D-cision CE : ' + d.pracDecisionDate : ''}
+            ${d.pracDecisionDate ? ' - Décision CE : ' + d.pracDecisionDate : ''}
             ${urlPart}
           </div>
         </div>
@@ -2331,7 +2331,7 @@ function injectEmaFlagsIntoSafety(d) {
     fragments.push(`
       <div class="flag-item flag-warning ema-flag-injected">
         ----- <div>
-          <div class="flag-label">Proc-dure EMA d-tect-e : ${d.pracDetails || 'Referral EMA'}</div>
+          <div class="flag-label">Procédure EMA détectée : ${d.pracDetails || 'Referral EMA'}</div>
           <div class="flag-detail">${[d.pracType, d.pracStatus].filter(Boolean).join(' - ')}
             ${d.pracUrl ? `<a href="${d.pracUrl}" target="_blank" style="color:var(--accent);margin-left:6px;font-size:0.78rem">-- ema.europa.eu --</a>` : ''}
           </div>
@@ -2346,7 +2346,7 @@ function injectEmaFlagsIntoSafety(d) {
     fragments.push(`
       <div class="flag-item flag-warning ema-flag-injected">
         ----- <div>
-          <div class="flag-label">DHPC EMA : ${dhpc.name || 'Communication s-curit- professionnels'}</div>
+          <div class="flag-label">DHPC EMA : ${dhpc.name || 'Communication sécurité professionnels'}</div>
           <div class="flag-detail">${[dhpc.date, dhpc.outcome].filter(Boolean).join(' - ')}
             ${dhpc.url ? `<a href="${dhpc.url}" target="_blank" style="color:var(--accent);margin-left:6px;font-size:0.78rem">-- Voir --</a>` : ''}
           </div>
@@ -2365,15 +2365,15 @@ function injectEmaFlagsIntoSafety(d) {
   if (_rEs) {
     if (d.pracActive && d.isSafetyReferral) {
       _rEs.textContent='-- Signal PRAC';_rEs.style.color='#ef4444';
-      _rEd.textContent=d.pracDetails?d.pracDetails.slice(0,60):'Referral s-curit- actif';
+      _rEd.textContent=d.pracDetails?d.pracDetails.slice(0,60):'Referral sécurité actif';
       if(_mEP){_mEP.textContent='-- Safety';_mEP.style.color='#ef4444';}
     } else if (d.pracActive) {
-      _rEs.textContent='---- Proc-dure EMA';_rEs.style.color='#f59e0b';
+      _rEs.textContent='---- Procédure EMA';_rEs.style.color='#f59e0b';
       _rEd.textContent=d.pracDetails?d.pracDetails.slice(0,60):'';
       if(_mEP){_mEP.textContent='---- PRAC';_mEP.style.color='#f59e0b';}
     } else if (d.hasDhpc) {
       _rEs.textContent='---- DHPC';_rEs.style.color='#f59e0b';
-      _rEd.textContent='Communication s-curit- professionnels';
+      _rEd.textContent='Communication sécurité professionnels';
       if(_mEP){_mEP.textContent='---- DHPC';_mEP.style.color='#f59e0b';}
     } else {
       _rEs.textContent='-- Aucun signal';_rEs.style.color='#10b981';_rEd.textContent='';
@@ -2395,7 +2395,7 @@ async function fetchSwissmedic(substance) {
     show('swiss-error')
 ;
     document.getElementById('swiss-error-text').textContent =
-      `Donn-es Swissmedic indisponibles : ${e.message}. Consultez directement swissmedic.ch`;
+      `Données Swissmedic indisponibles : ${e.message}. Consultez directement swissmedic.ch`;
   }
 }
 
@@ -2406,14 +2406,14 @@ function injectSwissFlagsIntoSafety(d) {
   if (_rSs) {
     if (d.pvAlert) {
       _rSs.textContent='---- Vigilance News';_rSs.style.color='#f59e0b';
-      _rSd.textContent='Mentionn- dans Vigilance News';
+      _rSd.textContent='Mentionné dans Vigilance News';
       if(_mSP){_mSP.textContent='---- Oui';_mSP.style.color='#f59e0b';}
     } else if (d.totalCHProducts > 0) {
-      _rSs.textContent='-- Autoris- CH';_rSs.style.color='#10b981';
+      _rSs.textContent='-- Autorisé CH';_rSs.style.color='#10b981';
       _rSd.textContent=d.totalCHProducts+' produit(s) Swissmedic';
-      if(_mSP){_mSP.textContent='-- Autoris-';_mSP.style.color='#10b981';}
+      if(_mSP){_mSP.textContent='-- Autorisé';_mSP.style.color='#10b981';}
     } else {
-      _rSs.textContent='-- Absent du march- CH';_rSs.style.color='var(--text-muted)';
+      _rSs.textContent='-- Absent du marché CH';_rSs.style.color='var(--text-muted)';
       _rSd.textContent='';
       if(_mSP){_mSP.textContent='--';_mSP.style.color='var(--text-muted)';}
     }
@@ -2422,7 +2422,7 @@ function injectSwissFlagsIntoSafety(d) {
   if (!_fc) return;
   _fc.querySelectorAll('.swiss-flag-injected').forEach(el=>el.remove());
   if (d.pvAlert) {
-    _fc.insertAdjacentHTML('afterbegin',`<div class="flag-item flag-warning swiss-flag-injected">----- <div><div class="flag-label">Swissmedic Vigilance News : ${d.pvDetails?'<a href="'+d.pvDetails+'" target="_blank" style="color:inherit;text-decoration:underline">Voir la notice</a>':'Signal d-tect-'}</div><div class="flag-detail">Communication de pharmacovigilance Swissmedic</div></div></div>`);  }
+    _fc.insertAdjacentHTML('afterbegin',`<div class="flag-item flag-warning swiss-flag-injected">----- <div><div class="flag-label">Swissmedic Vigilance News : ${d.pvDetails?'<a href="'+d.pvDetails+'" target="_blank" style="color:inherit;text-decoration:underline">Voir la notice</a>':'Signal détecté'}</div><div class="flag-detail">Communication de pharmacovigilance Swissmedic</div></div></div>`);  }
 }
 
 function renderSwissmedic(d) {
@@ -2449,11 +2449,11 @@ function renderSwissmedic(d) {
   // Niveau de concurrence CH
   const n = d.totalCHProducts || 0;
   let compIcon, compText;
-  if (n === 0)      { compIcon = '--'; compText = 'Absent du march- CH'; }
+  if (n === 0)      { compIcon = '--'; compText = 'Absent du marché CH'; }
   else if (n <= 3)  { compIcon = '--'; compText = 'Peu de concurrents CH'; }
-  else if (n <= 8)  { compIcon = '--'; compText = 'Concurrence mod-r-e CH'; }
-  else if (n <= 15) { compIcon = '--'; compText = 'March- CH comp-titif'; }
-  else              { compIcon = '--'; compText = 'March- CH satur-'; }
+  else if (n <= 8)  { compIcon = '--'; compText = 'Concurrence modérée CH'; }
+  else if (n <= 15) { compIcon = '--'; compText = 'Marché CH compétitif'; }
+  else              { compIcon = '--'; compText = 'Marché CH saturé'; }
   document.getElementById('m-swiss-comp-icon').textContent = compIcon;
   document.getElementById('m-swiss-comp-text').textContent = compText;
 
