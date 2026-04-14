@@ -495,11 +495,12 @@ async function fetchBelgium(substance, terms) {
   // ── Step 0: Fetch SAM version ──
   var samVersion = await getSamVersion(beDebug);
 
-  // ── Strategy 1: SAM REST API variants ──
+  // ── Strategy 1: SAM REST API variants (v15: added substanceName) ──
   var samUrls = [
-    'https://www.vas.ehealth.fgov.be/samcivics/rest/samv2/amp?officialName=' + encodeURIComponent(substance) + '&language=fr&status=AUTHORIZED&pageSize=100',
+    'https://www.vas.ehealth.fgov.be/websamcivics/samcivics/rest/samv2/amp?substanceName=' + encodeURIComponent(substance) + '&language=fr&pageSize=100',
     'https://www.vas.ehealth.fgov.be/websamcivics/samcivics/rest/samv2/amp?officialName=' + encodeURIComponent(substance) + '&language=fr&status=AUTHORIZED&pageSize=100',
     'https://www.vas.ehealth.fgov.be/websamcivics/samcivics/rest/samv2/amp?ingredientName=' + encodeURIComponent(substance) + '&language=fr&pageSize=100',
+    'https://www.vas.ehealth.fgov.be/samcivics/rest/samv2/amp?officialName=' + encodeURIComponent(substance) + '&language=fr&status=AUTHORIZED&pageSize=100',
   ];
 
   for (var si = 0; si < samUrls.length && products.length === 0; si++) {
@@ -554,12 +555,12 @@ async function fetchBelgium(substance, terms) {
     }
   }
 
-  // ── Strategy 3: CBIP search ──
+  // ── Strategy 3: CBIP search (v15: parse JSON autocomplete response) ──
   if (products.length === 0) {
     var cbipHeaders = {
       'Referer': 'https://www.cbip.be/',
       'X-Requested-With': 'XMLHttpRequest',
-      'Accept': 'text/html, */*'
+      'Accept': 'application/json, text/html, */*'
     };
     var cbipUrls = [
       'https://www.cbip.be/fr/search?query=' + encodeURIComponent(substance),
@@ -572,18 +573,32 @@ async function fetchBelgium(substance, terms) {
         beDebug['s3len' + ci] = cHtml.length;
         beDebug['s3pre' + ci] = cHtml.substring(0, 400);
         var seen3 = {};
-        var re3a = /(?:data-title|data-name|alt)="([^"]{5,80})"/gi;
-        var mm3;
-        while ((mm3 = re3a.exec(cHtml)) !== null) {
-          var c3 = mm3[1].trim();
-          if (matchesTerms(c3, terms) && !seen3[c3]) { seen3[c3] = true; products.push({ name: c3, holder: '', status: 'Autoris\u00e9' }); }
-          if (products.length >= 50) break;
+        // v15: CBIP returns JSON autocomplete — walk recursively
+        function walkCbip(items) {
+          if (!Array.isArray(items)) return;
+          for (var k = 0; k < items.length; k++) {
+            var item = items[k];
+            // Strip HTML tags from title to get plain text
+            var title = (item.title || '').replace(/<[^>]+>/g, '').trim();
+            if (title && title.length >= 4 && title.length < 150 && matchesTerms(title, terms) && !seen3[title]) {
+              seen3[title] = true;
+              products.push({ name: title, holder: '', status: 'Autoris\u00e9' });
+            }
+            if (item.children && products.length < 50) walkCbip(item.children);
+            if (products.length >= 50) break;
+          }
         }
-        if (products.length === 0) {
-          var re3b = /<(?:h[1-6]|a|span|li|td)[^>]*>([^<]{5,80})<\/(?:h[1-6]|a|span|li|td)>/gi;
-          while ((mm3 = re3b.exec(cHtml)) !== null) {
-            var c3b = mm3[1].trim().replace(/\s+/g, ' ');
-            if (matchesTerms(c3b, terms) && !seen3[c3b]) { seen3[c3b] = true; products.push({ name: c3b, holder: '', status: 'Autoris\u00e9' }); }
+        try {
+          var cbipJson = JSON.parse(cHtml);
+          walkCbip(cbipJson);
+          beDebug['s3jsonOk' + ci] = true;
+        } catch(jsonErr) {
+          // Fallback: HTML regex
+          var re3a = /(?:data-title|data-name|alt)="([^"]{5,80})"/gi;
+          var mm3;
+          while ((mm3 = re3a.exec(cHtml)) !== null) {
+            var c3 = mm3[1].trim();
+            if (matchesTerms(c3, terms) && !seen3[c3]) { seen3[c3] = true; products.push({ name: c3, holder: '', status: 'Autoris\u00e9' }); }
             if (products.length >= 50) break;
           }
         }
@@ -594,16 +609,27 @@ async function fetchBelgium(substance, terms) {
     }
   }
 
-  // ── Strategy 4: FAGG/FAMHP medicines list ──
+  // ── Strategy 4: FAGG/FAMHP medicines list (v15: multiple URL variants) ──
   if (products.length === 0) {
     try {
-      var faggUrl = 'https://www.fagg.be/nl/menselijk_gebruik/geneesmiddelen/geneesmiddelen/lijst?title=' +
-        encodeURIComponent(substance) + '&combine=' + encodeURIComponent(substance);
+      // Try the search_api_fulltext endpoint (newer FAGG site structure)
+      var faggUrl = 'https://www.fagg.be/nl/bijsluiter_en_wetenschappelijke_informatie/geneesmiddelen/geneesmiddelen_voor_menselijk_gebruik/lijst_van_geneesmiddelen?search_api_fulltext=' +
+        encodeURIComponent(substance);
       beDebug.s4url = faggUrl;
       var faggHtml = await fetchApiText(faggUrl, 10000, {
         'Referer': 'https://www.fagg.be/',
         'Accept': 'text/html,application/xhtml+xml,*/*'
       });
+      // Fallback to old URL if this returns 404-like empty response
+      if (faggHtml.length < 500) {
+        faggUrl = 'https://www.fagg.be/fr/usage_humain/medicaments/medicaments/liste?title=' +
+          encodeURIComponent(substance) + '&combine=' + encodeURIComponent(substance);
+        beDebug.s4url2 = faggUrl;
+        faggHtml = await fetchApiText(faggUrl, 10000, {
+          'Referer': 'https://www.fagg.be/',
+          'Accept': 'text/html,application/xhtml+xml,*/*'
+        });
+      }
       beDebug.s4len = faggHtml.length;
       beDebug.s4pre = faggHtml.substring(0, 600);
       var seen4 = {};
