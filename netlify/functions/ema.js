@@ -1,8 +1,10 @@
 /**
- * PharmaScout Ã¢ÂÂ Netlify Function : EMA Proxy (v4)
- * Utilise les JSON data files officiels de l'EMA (mis ÃÂ  jour 2x/jour).
- * - Referrals JSON : 709 KB, contient tous les referrals PRAC
- * - DHPCs JSON    : communications directes professionnels de santÃÂ©
+ * PharmaScout — Netlify Function : EMA Proxy (v5)
+ * Utilise les JSON data files officiels de l'EMA (mis à jour 2x/jour).
+ * - Referrals JSON  : tous les referrals PRAC (Art. 30, 31, 107i, etc.)
+ * - DHPCs JSON      : communications directes professionnels de santé
+ * - PSUSAs JSON     : évaluations périodiques de sécurité (NEW v5)
+ * - Medicines JSON  : produits centralement autorisés
  * Cache module-level (persist entre invocations warm Lambda).
  */
 
@@ -10,10 +12,13 @@ const https = require('https');
 
 const EMA_REFERRALS_URL = 'https://www.ema.europa.eu/en/documents/report/referrals-output-json-report_en.json';
 const EMA_DHPC_URL      = 'https://www.ema.europa.eu/en/documents/report/dhpc-output-json-report_en.json';
+const EMA_PSUSA_URL     = 'https://www.ema.europa.eu/en/documents/report/medicines-output-periodic_safety_update_report_single_assessments-output-json-report_en.json';
+const EMA_MEDICINES_URL = 'https://www.ema.europa.eu/en/documents/report/medicines-output-medicines_json-report_en.json';
 
 // Cache module-level (warm Lambda instances)
-let _cache = { referrals: null, dhpcs: null, ts: 0 };
-const CACHE_TTL = 6 * 60 * 60 * 1000; // 6h
+let _cache = { referrals: null, dhpcs: null, psusas: null, medicines: null, ts: 0, tsMed: 0 };
+const CACHE_TTL     = 6 * 60 * 60 * 1000;  // 6h for referrals/dhpcs/psusas
+const CACHE_TTL_MED = 12 * 60 * 60 * 1000; // 12h for medicines (large file)
 
 const HEADERS = {
   'Content-Type': 'application/json',
@@ -32,21 +37,36 @@ exports.handler = async (event) => {
   }
 
   try {
-    // --- 1. Charger / rafraÃÂ®chir le cache EMA ---
     const now = Date.now();
+
+    // --- 1. Charger / rafraîchir le cache EMA (referrals + DHPCs + PSUSAs) ---
     if (!_cache.referrals || (now - _cache.ts) > CACHE_TTL) {
-      const [refData, dhpcData] = await Promise.all([
+      const [refData, dhpcData, psusaData] = await Promise.all([
         fetchJson(EMA_REFERRALS_URL, 25000),
-        fetchJson(EMA_DHPC_URL, 25000).catch(() => ({ data: [] }))
+        fetchJson(EMA_DHPC_URL, 25000).catch(() => ({ data: [] })),
+        fetchJson(EMA_PSUSA_URL, 25000).catch(() => ({ data: [] }))
       ]);
-      _cache.referrals = (refData && refData.data) ? refData.data : [];
-      _cache.dhpcs     = (dhpcData && dhpcData.data) ? dhpcData.data : [];
+      _cache.referrals = extractArray(refData);
+      _cache.dhpcs     = extractArray(dhpcData);
+      _cache.psusas    = extractArray(psusaData);
       _cache.ts = now;
     }
 
-    // --- 2. Construire les mots-clÃÂ©s de recherche ---
-    // DÃÂ©compose la substance en mots (ex: "finasteride" Ã¢ÂÂ ["finasteride"])
-    // TolÃÂ¨re les substances composÃÂ©es (ex: "finasteride dutasteride")
+    // --- 1b. Charger les médicaments (séparé car fichier très volumineux) ---
+    if (!_cache.medicines || (now - _cache.tsMed) > CACHE_TTL_MED) {
+      try {
+        const medData = await Promise.race([
+          fetchJson(EMA_MEDICINES_URL, 20000),
+          new Promise(r => setTimeout(() => r(null), 12000))
+        ]);
+        _cache.medicines = medData ? extractArray(medData) : [];
+        _cache.tsMed = now;
+      } catch (_) {
+        if (!_cache.medicines) _cache.medicines = [];
+      }
+    }
+
+    // --- 2. Construire les mots-clés de recherche ---
     const substanceClean = substance.replace(/[^a-z0-9\s]/g, ' ').trim();
     const keywords = [...new Set(
       substanceClean.split(/\s+/).filter(w => w.length >= 4)
@@ -65,7 +85,7 @@ exports.handler = async (event) => {
           || matchesSubstance(r.referral_name);
     });
 
-    // Trier : safety referrals en premier, puis par date de dÃÂ©cision (plus rÃÂ©cent)
+    // Trier : safety referrals en premier, puis par date de décision (plus récent)
     matchingReferrals.sort((a, b) => {
       if (a.safety_referral === 'Yes' && b.safety_referral !== 'Yes') return -1;
       if (a.safety_referral !== 'Yes' && b.safety_referral === 'Yes') return 1;
@@ -88,64 +108,74 @@ exports.handler = async (event) => {
       type:     d.dhpc_type          || ''
     }));
 
-    // --- 5. Construire la rÃÂ©ponse ---
-    
-    var emaProducts = [];
-  try {
-    var medData = await Promise.race([
-      fetchJson('https://www.ema.europa.eu/en/documents/report/medicines-output-medicines_json-report_en.json', 18000),
-      new Promise(function(r) { setTimeout(function() { r(null); }, 8000); })
-    ]);
-    if (medData) {
-      var arr = Array.isArray(medData) ? medData : (medData.data || []);
-      emaProducts = arr.filter(function(r) {
-        return r.active_substance && r.active_substance.toLowerCase().indexOf(substance) !== -1;
-      }).slice(0, 30).map(function(r) {
-        return {
-          name: r.name_of_medicine || '—',
-          holder: r.marketing_authorisation_developer_applicant_holder || '—',
-          status: r.medicine_status || '—'
-        };
-      });
-    }
-  } catch(e) { /* silent fail */ }
-  return {
-    statusCode: 200,
-    headers: HEADERS,
-    body: JSON.stringify({
+    // --- 5. Recherche dans les PSUSAs (NEW v5) ---
+    const matchingPsusas = _cache.psusas.filter(p => {
+      return matchesSubstance(p.active_substances_in_scope_of_procedure)
+          || matchesSubstance(p.related_medicines);
+    }).map(p => ({
+      substance:  p.active_substances_in_scope_of_procedure || '',
+      medicines:  p.related_medicines || '',
+      procedure:  p.procedure_number  || '',
+      outcome:    p.regulatory_outcome || '',
+      url:        p.psusa_url         || '',
+      updated:    p.last_updated_date || ''
+    }));
+
+    // Trier PSUSAs par date de mise à jour (plus récent d'abord)
+    matchingPsusas.sort((a, b) => (b.updated || '').localeCompare(a.updated || ''));
+
+    // --- 6. Recherche dans les Médicaments autorisés ---
+    const emaProducts = _cache.medicines.filter(r => {
+      return r.active_substance && r.active_substance.toLowerCase().includes(substance);
+    }).slice(0, 30).map(r => ({
+      name:   r.name_of_medicine || '—',
+      holder: r.marketing_authorisation_developer_applicant_holder || '—',
+      status: r.medicine_status || '—'
+    }));
+
+    // --- 7. Construire la réponse ---
+    return {
+      statusCode: 200,
+      headers: HEADERS,
+      body: JSON.stringify({
         substance,
 
-        // Produits centralement autorisÃÂ©s par l'EMA (molÃÂ©cules nationales = 0, c'est correct)
+        // Produits centralement autorisés par l'EMA
         totalEUProducts: emaProducts.length,
         products: emaProducts,
 
-        // Signal de sÃÂ©curitÃÂ© PRAC
+        // Signal de sécurité PRAC (referrals)
         pracActive,
-        pracDetails:        mainRef ? mainRef.referral_name                        : null,
-        pracUrl:            mainRef ? mainRef.referral_url                         : null,
-        pracStatus:         mainRef ? mainRef.current_status                       : null,
-        pracRecommendation: mainRef ? mainRef.prac_recommendation                  : null,
-        pracDecisionDate:   mainRef ? mainRef.european_commission_decision_date    : null,
-        pracType:           mainRef ? mainRef.referral_type                        : null,
-        isSafetyReferral:   mainRef ? (mainRef.safety_referral === 'Yes')          : false,
+        pracDetails:        mainRef ? mainRef.referral_name                          : null,
+        pracUrl:            mainRef ? mainRef.referral_url                           : null,
+        pracStatus:         mainRef ? mainRef.current_status                         : null,
+        pracRecommendation: mainRef ? mainRef.prac_recommendation                   : null,
+        pracDecisionDate:   mainRef ? mainRef.european_commission_decision_date      : null,
+        pracType:           mainRef ? mainRef.referral_type                          : null,
+        isSafetyReferral:   mainRef ? (mainRef.safety_referral === 'Yes')            : false,
 
         // Tous les referrals correspondants
         allReferrals: matchingReferrals.map(r => ({
-          name:            r.referral_name,
-          url:             r.referral_url,
-          inn:             r.international_non_proprietary_name_inn_common_name,
-          status:          r.current_status,
-          type:            r.referral_type,
-          isSafety:        r.safety_referral === 'Yes',
-          recommendation:  r.prac_recommendation,
-          startDate:       r.procedure_start_date,
-          decisionDate:    r.european_commission_decision_date
+          name:           r.referral_name,
+          url:            r.referral_url,
+          inn:            r.international_non_proprietary_name_inn_common_name,
+          status:         r.current_status,
+          type:           r.referral_type,
+          isSafety:       r.safety_referral === 'Yes',
+          recommendation: r.prac_recommendation,
+          startDate:      r.procedure_start_date,
+          decisionDate:   r.european_commission_decision_date
         })),
 
-        // DHPCs (communications sÃÂ©curitÃÂ©)
+        // PSUSAs (NEW v5)
+        psusas: matchingPsusas,
+        totalPsusas: matchingPsusas.length,
+
+        // DHPCs (communications sécurité)
         dhpcs: matchingDhpcs,
         hasDhpc: matchingDhpcs.length > 0,
 
+        // Compteurs
         referralMentions: matchingReferrals.length,
         safetyReferralCount: safetyRefs.length,
 
@@ -165,14 +195,25 @@ exports.handler = async (event) => {
 };
 
 /**
- * TÃÂ©lÃÂ©charge et parse un fichier JSON depuis une URL HTTPS.
+ * Extrait un tableau depuis une réponse JSON EMA.
+ * Les fichiers EMA encapsulent les données dans { data: [...] } ou retournent directement un tableau.
+ */
+function extractArray(jsonData) {
+  if (!jsonData) return [];
+  if (Array.isArray(jsonData)) return jsonData;
+  if (jsonData.data && Array.isArray(jsonData.data)) return jsonData.data;
+  return [];
+}
+
+/**
+ * Télécharge et parse un fichier JSON depuis une URL HTTPS.
  * Suit les redirections HTTP 3xx.
  */
 function fetchJson(url, timeout = 20000) {
   return new Promise((resolve, reject) => {
     const req = https.get(url, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; PharmaScout/1.0)',
+        'User-Agent': 'Mozilla/5.0 (compatible; PharmaScout/2.0)',
         'Accept':     'application/json, */*'
       }
     }, (res) => {
