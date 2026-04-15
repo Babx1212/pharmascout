@@ -596,7 +596,7 @@
   <div class="container" style="max-width:960px">
     <div class="inner">
       <div class="brand">
-        <div class="brand-icon">-</div>
+        <div class="brand-icon"><i class="bi bi-capsule" style="color:#60a5fa"></i></div>
         <div>
           <div class="brand-name">PharmaScout</div>
           <div class="brand-sub">Évaluation d'attractivité - Génériques &amp; Biosimilaires</div>        </div>
@@ -699,7 +699,7 @@
   <!-- -- LOADING -- -->
   <div class="loading-overlay card" id="loading-section">
     <div class="spinner"></div>
-    <div class="loading-title">Analyse en cours-</div>
+    <div class="loading-title">Analyse en cours…</div>
     <div class="loading-step" id="loading-step">Initialisation</div>
     <div class="loading-bar-wrap">
       <div class="progress">
@@ -833,8 +833,10 @@
           </div>
 
           <!-- Signals & alerts -->
-          <div class="section-heading"><i class="bi bi-exclamation-triangle"></i>Alertes & signaux détectés</div>
-          <div id="flags-container"></div>
+          <div id="flags-section" style="display:none">
+            <div class="section-heading"><i class="bi bi-exclamation-triangle"></i>Alertes & signaux détectés</div>
+            <div id="flags-container"></div>
+          </div>
 
           <!-- Top reactions -->
           <div id="reactions-section" style="display:none">
@@ -842,57 +844,13 @@
             <div id="reactions-chart"></div>
           </div>
 
-          <!-- PubMed -->
-          <div class="section-heading mt-3"><i class="bi bi-journals"></i>Littérature scientifique (PubMed)</div>
-          <div class="row g-2">
-            <div class="col-4">
-              <div class="metric-box">
-                <div class="metric-value" id="m-pubmed-total">-</div>
-                <div class="metric-label">Publications totales</div>
-              </div>
-            </div>
-            <div class="col-4">
-              <div class="metric-box">
-                <div class="metric-value" id="m-pubmed-safety">-</div>
-                <div class="metric-label">Publications sécurité</div>
-              </div>
-            </div>
-            <div class="col-4">
-              <div class="metric-box">
-                <div class="metric-value" id="m-pubmed-recent">-</div>
-                <div class="metric-label">Publications récentes</div>
-                <div class="metric-sub">2023-2026</div>
-              </div>
-            </div>
+          <!-- PubMed detail metrics (hidden, used by JS) -->
+          <div style="display:none">
+            <span id="m-pubmed-safety"></span>
+            <span id="m-pubmed-recent"></span>
           </div>
 
-          <!-- Regulatory overview (inline status) -->
-          <div id="regulatory-overview" class="mt-3">
-            <div class="section-heading"><i class="bi bi-patch-check"></i>Aper-u réglementaire</div>
-            <div class="row g-2">
-              <div class="col-4">
-                <div class="reg-mini" id="reg-fda-block">
-                  <div class="reg-mini-label">-- FDA</div>
-                  <div class="reg-mini-status" id="reg-fda-status">-</div>
-                  <div class="reg-mini-detail" id="reg-fda-detail"></div>
-                </div>
-              </div>
-              <div class="col-4">
-                <div class="reg-mini" id="reg-ema-block">
-                  <div class="reg-mini-label">-- EMA</div>
-                  <div class="reg-mini-status" id="reg-ema-status">Chargement-</div>
-                  <div class="reg-mini-detail" id="reg-ema-detail"></div>
-                </div>
-              </div>
-              <div class="col-4">
-                <div class="reg-mini" id="reg-swiss-block">
-                  <div class="reg-mini-label">-- Swissmedic</div>
-                  <div class="reg-mini-status" id="reg-swiss-status">Chargement-</div>
-                  <div class="reg-mini-detail" id="reg-swiss-detail"></div>
-                </div>
-              </div>
-            </div>
-          </div>
+          <!-- Regulatory overview removed: deduplicated with Réglementaire EU/CH tab -->
 
         </div><!-- /tab-safety -->
 
@@ -904,7 +862,7 @@
 
           <div id="ema-loading" style="text-align:center;padding:24px;color:var(--text-muted);display:none">
             <div class="spinner" style="width:28px;height:28px;margin:0 auto 10px"></div>
-            Interrogation des données officielles EMA-
+            Interrogation des données officielles EMA…
           </div>
           <div id="ema-error" style="display:none" class="flag-item flag-warning">
             <i class="bi bi-exclamation-triangle"></i>
@@ -952,7 +910,7 @@
             <div id="ema-no-prac" style="display:none" class="flag-item flag-success">
               <i class="bi bi-check-circle-fill"></i>
               <div>
-                <div class="flag-label" style="color:var(--success)">Aucun referral PRAC trouv-</div>
+                <div class="flag-label" style="color:var(--success)">Aucun referral PRAC trouvé</div>
                 <div class="flag-detail">Aucune procédure de sécurité EMA répertoriée pour cette substance.</div>
               </div>
             </div>
@@ -985,7 +943,7 @@
           </div>
 
           <div id="ema-pending" style="text-align:center;padding:24px;color:var(--text-muted)">
-            Lancez une analyse pour voir les données EMA.
+            <i class="bi bi-arrow-up-circle" style="margin-right:4px"></i>Lancez une analyse ci-dessus pour afficher les données EMA.
           </div>
 
           <!-- DIVIDER -->
@@ -996,7 +954,7 @@
 
           <div id="swiss-loading" style="text-align:center;padding:24px;color:var(--text-muted);display:none">
             <div class="spinner" style="width:28px;height:28px;margin:0 auto 10px"></div>
-            Interrogation de Swissmedic-
+            Interrogation de Swissmedic…
           </div>
           <div id="swiss-error" style="display:none" class="flag-item flag-warning">
             <i class="bi bi-exclamation-triangle"></i>
@@ -1014,15 +972,15 @@
               <div class="col-4">
                 <div class="metric-box">
                   <div class="metric-value sm" id="m-swiss-pv">-</div>
-                  <div class="metric-label">Alerte pharmacovigi.</div>
+                  <div class="metric-label">Alerte pharmacovigilance</div>
                   <div class="metric-sub">Vigilance News</div>
                 </div>
               </div>
               <div class="col-4">
                 <div class="metric-box">
-                  <div class="metric-value sm" id="m-swiss-comp-icon">-</div>
-                  <div class="metric-label">Concurrence CH</div>
-                  <div class="metric-sub" id="m-swiss-comp-text"></div>
+                  <div class="metric-value" id="m-swiss-holders">-</div>
+                  <div class="metric-label">Titulaires AMM</div>
+                  <div class="metric-sub">Swissmedic CH</div>
                 </div>
               </div>
             </div>
@@ -1053,7 +1011,7 @@
             </div>
           </div>
           <div id="swiss-pending" style="text-align:center;padding:24px;color:var(--text-muted)">
-            Lancez une analyse pour voir les données Swissmedic.
+            <i class="bi bi-arrow-up-circle" style="margin-right:4px"></i>Lancez une analyse ci-dessus pour afficher les données Swissmedic.
           </div>
 
         </div><!-- /tab-regulatory -->
@@ -1104,12 +1062,12 @@
             <div id="eu-territory-groups"></div>
           </div>
           <div id="eu-products-pending" style="padding:12px 14px;background:#fafbfc;border-radius:var(--radius);border:1px solid var(--border);font-size:0.82rem;color:var(--text-muted)">
-            Lancez une analyse pour voir les données européennes.
+            <i class="bi bi-arrow-up-circle" style="margin-right:4px"></i>Lancez une analyse ci-dessus pour afficher les données européennes.
           </div>
 
           <div class="info-box mt-3">
             <i class="bi bi-info-circle"></i>
-            Données FDA : <strong>FDA Orange Book</strong> (marché am-ricain).
+            Données FDA : <strong>FDA Orange Book</strong> (marché américain).
             Données EU : bases officielles FR, ES, PT, BE.
           </div>
         </div><!-- /tab-comp -->
@@ -1179,7 +1137,7 @@
     <!-- Export -->
     <div class="text-end mb-4">
       <button class="btn-export" onclick="exportReport()">
-        <i class="bi bi-download"></i>T-l-charger le rapport
+        <i class="bi bi-download"></i>Télécharger le rapport
       </button>
     </div>
 
@@ -1219,11 +1177,13 @@ function resetResults() {
     if (el) { el.textContent = '-'; el.style.color = ''; }
   });
   // m-pubmed-total has two instances
-  document.querySelectorAll('[id="m-pubmed-total"]').forEach(e => { e.textContent = '-'; e.style.color = ''; });
+  { const el = document.getElementById('m-pubmed-total'); if(el) { el.textContent = '-'; el.style.color = ''; } }
 
   // Reset flags
   const fc = document.getElementById('flags-container');
+  const fs = document.getElementById('flags-section');
   if (fc) fc.innerHTML = '';
+  if (fs) fs.style.display = 'none';
   document.getElementById('reactions-section').style.display = 'none';
   document.getElementById('reactions-chart').innerHTML = '';
 
@@ -1256,8 +1216,8 @@ function resetResults() {
   document.getElementById('m-swiss-total').textContent = '-';
   document.getElementById('m-swiss-pv').textContent = '-';
   document.getElementById('m-swiss-pv').style.color = '';
-  document.getElementById('m-swiss-comp-icon').textContent = '-';
-  document.getElementById('m-swiss-comp-text').textContent = '';
+  const _swHolders = document.getElementById('m-swiss-holders');
+  if (_swHolders) _swHolders.textContent = '-';
 
   // Reset competition
   document.getElementById('manufacturers-section').style.display = 'none';
@@ -1977,8 +1937,10 @@ function renderResults() {
 
   // Flags
   const flagsEl = document.getElementById('flags-container');
+  const flagsSec = document.getElementById('flags-section');
+  if (flagsSec) flagsSec.style.display = '';
   if (sf.flags.length === 0) {
-    flagsEl.innerHTML = '<div style="color:#10b981; font-weight:600">-- Aucun signal de sécurité majeur détecté dans les sources publiques analysées.</div>';
+    flagsEl.innerHTML = '<div class="flag-item flag-success"><i class="bi bi-check-circle-fill"></i><div><div class="flag-label" style="color:var(--success)">Aucun signal de sécurité majeur détecté</div><div class="flag-detail">Aucune alerte identifiée dans les sources publiques analysées.</div></div></div>';
   } else {
     flagsEl.innerHTML = sf.flags.map(f => `
       <div class="flag-item flag-${f.level}">
@@ -1997,11 +1959,11 @@ function renderResults() {
     const _fda = sf.score < 5
       ? { text: '🔴 Signaux détectés', color: '#ef4444', detail: fmt(faers.totalReports) + ' rapports FAERS' }
       : { text: '🟢 Profil acceptable', color: '#10b981', detail: fmt(faers.totalReports) + ' rapports FAERS' };
-    document.getElementById('reg-fda-status').textContent = _fda.text;
-    document.getElementById('reg-fda-status').style.color = _fda.color;
-    document.getElementById('reg-fda-detail').textContent = _fda.detail;
+    const _rfda = document.getElementById('reg-fda-status'); if(_rfda){ _rfda.textContent = _fda.text;
+    _rfda.style.color = _fda.color; }
+    const _rfdaD = document.getElementById('reg-fda-detail'); if(_rfdaD) _rfdaD.textContent = _fda.detail;
   }
-  document.querySelectorAll('[id="m-pubmed-total"]').forEach(e=>e.textContent=fmt(pubmed.totalPublications));
+  { const el = document.getElementById('m-pubmed-total'); if(el) el.textContent = fmt(pubmed.totalPublications); }
   document.getElementById('m-pubmed-safety').textContent = fmt(pubmed.safetyPublications);
   document.getElementById('m-pubmed-recent').textContent = fmt(pubmed.recentSafetyPublications);
 
@@ -2162,10 +2124,10 @@ DONN-ES SÉCURITÉ (FDA FAERS)
 'N/A'})
   Décès rapportés     : ${fmt(faers.deathReports)} (${faers.totalReports > 0 ? pct(sf.details.deathRate) : 'N/A'})
 
-ALERTES D-TECT-ES
+ALERTES DÉTECTÉES
 ${sf.flags.length === 0 ? '  Aucune alerte majeure détectée.' : sf.flags.map(f => `  ${f.emoji} ${f.text} -- ${f.detail}`).join('\n')}
 
-LITT-RATURE (PubMed)
+LITTÉRATURE (PubMed)
   Publications sécurité    : ${fmt(pubmed.safetyPublications)}
   Publications récentes    : ${fmt(pubmed.recentSafetyPublications)} (2023-2026)
 
@@ -2181,7 +2143,7 @@ CONCURRENCE (FDA Orange Book)
 // ----------------------------------------------
 MARCHÉ
 ${ms.source === 'IQVIA' ? `  Valeur totale (CHF)      : ${fmt(Math.round(ms.totalMarketValueCHF))}
-  Croissance              : ${ms.marketGrowthPct >= 0 ? '+' : ''}${ms.marketGrowthPct.toFixed(1)}%` : '  Score neutre appliqu- (données IQVIA non fournies)'}
+  Croissance              : ${ms.marketGrowthPct >= 0 ? '+' : ''}${ms.marketGrowthPct.toFixed(1)}%` : '  Score neutre appliqué (données IQVIA non fournies)'}
 
 // -----------------------------------------------------------------------------------------------------------
 // --------
@@ -2229,7 +2191,7 @@ function renderEMA(d) {
   const dhpcs        = d.dhpcs        || [];
   const pracActive   = d.pracActive   || false;
 
-  // ---- M-triques principales ----
+  // ---- Métriques principales ----
   const pracEl = document.getElementById('m-ema-prac');
   if (pracActive) {
     pracEl.textContent = d.isSafetyReferral ? '🔴 Safety' : '🟡 Actif';
@@ -2407,24 +2369,24 @@ function injectEmaFlagsIntoSafety(d) {
     container.insertAdjacentHTML('afterbegin', fragments.join(''));
   }
 
-  const _rEs=document.getElementById('reg-ema-status');
+  const _rEs=document.getElementById('reg-ema-status'); // may be null (deduplicated)
   const _rEd=document.getElementById('reg-ema-detail');
   const _mEP=document.getElementById('m-ema-prac-safety');
   if (_rEs) {
     if (d.pracActive && d.isSafetyReferral) {
-      _rEs.textContent='🔴 Signal PRAC';_rEs.style.color='#ef4444';
+      if(_rEs){_rEs.textContent='🔴 Signal PRAC';_rEs.style.color='#ef4444';}
       _rEd.textContent=d.pracDetails?d.pracDetails.slice(0,60):'Referral sécurité actif';
       if(_mEP){_mEP.textContent='🔴 Safety';_mEP.style.color='#ef4444';}
     } else if (d.pracActive) {
-      _rEs.textContent='🟡 Procédure EMA';_rEs.style.color='#f59e0b';
+      if(_rEs){_rEs.textContent='🟡 Procédure EMA';_rEs.style.color='#f59e0b';}
       _rEd.textContent=d.pracDetails?d.pracDetails.slice(0,60):'';
       if(_mEP){_mEP.textContent='🟡 PRAC';_mEP.style.color='#f59e0b';}
     } else if (d.hasDhpc) {
-      _rEs.textContent='🟡 DHPC';_rEs.style.color='#f59e0b';
+      if(_rEs){_rEs.textContent='🟡 DHPC';_rEs.style.color='#f59e0b';}
       _rEd.textContent='Communication sécurité professionnels';
       if(_mEP){_mEP.textContent='🟡 DHPC';_mEP.style.color='#f59e0b';}
     } else {
-      _rEs.textContent='🟢 Aucun signal';_rEs.style.color='#10b981';_rEd.textContent='';
+      if(_rEs){_rEs.textContent='🟢 Aucun signal';_rEs.style.color='#10b981';}if(_rEd){_rEd.textContent='';}
       
 if(_mEP){_mEP.textContent='🟢 Aucun';_mEP.style.color='#10b981';}
     }
@@ -2448,21 +2410,21 @@ async function fetchSwissmedic(substance) {
 }
 
 function injectSwissFlagsIntoSafety(d) {
-  const _rSs=document.getElementById('reg-swiss-status');
-  const _rSd=document.getElementById('reg-swiss-detail');
+  const _rSs=document.getElementById('reg-swiss-status'); // may be null
+  const _rSd=document.getElementById('reg-swiss-detail'); // may be null
   const _mSP=document.getElementById('m-swiss-pv-safety');
   if (_rSs) {
     if (d.pvAlert) {
-      _rSs.textContent='🟡 Vigilance News';_rSs.style.color='#f59e0b';
-      _rSd.textContent='Mentionné dans Vigilance News';
+      if(_rSs){_rSs.textContent='🟡 Vigilance News';_rSs.style.color='#f59e0b';}
+      if(_rSd){_rSd.textContent='Mentionné dans Vigilance News';}
       if(_mSP){_mSP.textContent='🟡 Oui';_mSP.style.color='#f59e0b';}
     } else if (d.totalCHProducts > 0) {
-      _rSs.textContent='🟢 Autorisé CH';_rSs.style.color='#10b981';
-      _rSd.textContent=d.totalCHProducts+' produit(s) Swissmedic';
+      if(_rSs){_rSs.textContent='🟢 Autorisé CH';_rSs.style.color='#10b981';}
+      if(_rSd){_rSd.textContent=d.totalCHProducts+' produit(s) Swissmedic';}
       if(_mSP){_mSP.textContent='🟢 Autorisé';_mSP.style.color='#10b981';}
     } else {
-      _rSs.textContent='⚪ Absent du marché CH';_rSs.style.color='var(--text-muted)';
-      _rSd.textContent='';
+      if(_rSs){_rSs.textContent='⚪ Absent du marché CH';}_rSs.style.color='var(--text-muted)';
+      if(_rSd){_rSd.textContent='';}
       if(_mSP){_mSP.textContent='--';_mSP.style.color='var(--text-muted)';}
     }
   }
@@ -2477,7 +2439,7 @@ function renderSwissmedic(d) {
   hide('swiss-loading');
   show('swiss-content');
 
-  // M-triques
+  // Métriques
   document.getElementById('m-swiss-total').textContent = d.totalCHProducts || '--';
 
   if (d.pvAlert) {
@@ -2494,16 +2456,10 @@ function renderSwissmedic(d) {
     hide('swiss-pv-alert');
   }
 
-  // Niveau de concurrence CH
-  const n = d.totalCHProducts || 0;
-  let compIcon, compText;
-  if (n === 0)      { compIcon = '--'; compText = 'Absent du marché CH'; }
-  else if (n <= 3)  { compIcon = '--'; compText = 'Peu de concurrents CH'; }
-  else if (n <= 8)  { compIcon = '--'; compText = 'Concurrence modérée CH'; }
-  else if (n <= 15) { compIcon = '--'; compText = 'Marché CH compétitif'; }
-  else              { compIcon = '--'; compText = 'Marché CH saturé'; }
-  document.getElementById('m-swiss-comp-icon').textContent = compIcon;
-  document.getElementById('m-swiss-comp-text').textContent = compText;
+  // Titulaires AMM (unique holders count)
+  const holders = new Set((d.products || []).map(p => (p.holder || '').trim()).filter(Boolean));
+  const holdersEl = document.getElementById('m-swiss-holders');
+  if (holdersEl) holdersEl.textContent = holders.size || '-';
 
   // Produits CH
   if (d.products && d.products.length > 0) {
