@@ -2461,6 +2461,21 @@ function injectEmaFlagsIntoSafety(d) {
   }
 }
 
+function fetchSwissmedic(substance) {
+  show('swiss-loading'); hide('swiss-content'); hide('swiss-error'); hide('swiss-pending');
+  try {
+    const r = await fetch(`/.netlify/functions/swissmedic-v2?substance=${encodeURIComponent(substance)}`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const d = await r.json();
+    renderSwissmedic(d);
+  } catch(e) {
+    hide('swiss-loading');
+    show('swiss-error');
+    document.getElementById('swiss-error-text').textContent =
+      `Données Swissmedic indisponibles : ${e.message}. Consultez directement swissmedic.ch`;
+  }
+}
+
 function injectSwissFlagsIntoSafety(d) {
   const _rSs=document.getElementById('reg-swiss-status'); // may be null
   const _rSd=document.getElementById('reg-swiss-detail'); // may be null
