@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PharmaScout - Analyse d'attractivitÃ© pharmaceutique</title>
+<title>PharmaScout - Analyse d'attractivité pharmaceutique</title>
 <!-- CDN Libraries -->
 <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.2/css/bootstrap.min.css" rel="stylesheet">
 <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
@@ -599,7 +599,7 @@
         <div class="brand-icon"><i class="bi bi-capsule" style="color:#60a5fa"></i></div>
         <div>
           <div class="brand-name">PharmaScout</div>
-          <div class="brand-sub">Ãvaluation d'attractivitÃ© - GÃ©nÃ©riques &amp; Biosimilaires</div>        </div>
+          <div class="brand-sub">Évaluation d'attractivité - Génériques &amp; Biosimilaires</div>        </div>
       </div>
       <span class="header-badge">Usage interne</span>
     </div>
@@ -614,7 +614,7 @@
   <div class="card">
     <div class="card-header-bar">
       <i class="bi bi-search"></i>
-      ParamÃ¨tres d'analyse    </div>
+      Paramètres d'analyse    </div>
     <div class="card-body">
       <div class="row g-3">
 
@@ -645,7 +645,7 @@
 
         <!-- IQVIA upload -->
         <div class="col-md-6">
-          <label class="form-label">DonnÃ©es marchÃ© <span class="opt">(optionnel - export IQVIA .xlsx)</span></label>
+          <label class="form-label">Données marché <span class="opt">(optionnel - export IQVIA .xlsx)</span></label>
           <div class="upload-zone" id="upload-zone"
                onclick="document.getElementById('iqvia-input').click()"
                ondragover="event.preventDefault()" ondrop="handleDrop(event)">
@@ -660,12 +660,12 @@
           <button class="btn-weights" type="button"
                   data-bs-toggle="collapse" data-bs-target="#weightsSection">
             <i class="bi bi-sliders"></i>
-            PondÃ©ration du score <span style="font-size:0.72rem;opacity:0.7">(avancÃ©)</span>
+            Pondération du score <span style="font-size:0.72rem;opacity:0.7">(avancé)</span>
           </button>
           <div class="collapse mt-3" id="weightsSection">
             <div class="weights-panel">
               <div class="weight-row">
-                <span class="weight-label">SÃ©curitÃ©</span>
+                <span class="weight-label">Sécurité</span>
                 <input type="range" id="w-safety" min="10" max="80" value="35" step="5" oninput="updateWeights()">
                 <span class="weight-value" id="w-safety-val">35%</span>
               </div>
@@ -675,7 +675,7 @@
                 <span class="weight-value" id="w-comp-val">35%</span>
               </div>
               <div class="weight-row">
-                <span class="weight-label">MarchÃ©</span>
+                <span class="weight-label">Marché</span>
                 <input type="range" id="w-market" min="10" max="80" value="30" step="5" oninput="updateWeights()">
                 <span class="weight-value" id="w-market-val">30%</span>
               </div>
@@ -699,7 +699,7 @@
   <!-- -- LOADING -- -->
   <div class="loading-overlay card" id="loading-section">
     <div class="spinner"></div>
-    <div class="loading-title">Analyse en coursâ¦</div>
+    <div class="loading-title">Analyse en cours…</div>
     <div class="loading-step" id="loading-step">Initialisation</div>
     <div class="loading-bar-wrap">
       <div class="progress">
@@ -727,7 +727,7 @@
       <!-- Sub-scores -->
       <div class="score-sub-area">
         <div class="sub-kpi">
-          <span class="sub-kpi-label">SÃ©curitÃ©</span>
+          <span class="sub-kpi-label">Sécurité</span>
           <span class="sub-kpi-val" id="score-safety">-</span>
           <div class="sub-kpi-bar"><div class="sub-kpi-bar-fill" id="bar-safety"></div></div>
           <span class="sub-kpi-source">FAERS + PubMed</span>
@@ -739,10 +739,10 @@
           <span class="sub-kpi-source">Orange Book</span>
         </div>
         <div class="sub-kpi">
-          <span class="sub-kpi-label">MarchÃ©</span>
+          <span class="sub-kpi-label">Marché</span>
           <span class="sub-kpi-val" id="score-market">-</span>
           <div class="sub-kpi-bar"><div class="sub-kpi-bar-fill" id="bar-market"></div></div>
-          <span class="sub-kpi-source" id="market-source-label">EstimÃ©</span>
+          <span class="sub-kpi-source" id="market-source-label">Estimé</span>
         </div>
       </div>
 
@@ -758,12 +758,12 @@
       <ul class="nav nav-tabs" id="detailTabs">
         <li class="nav-item">
           <a class="nav-link active" data-bs-toggle="tab" href="#tab-safety">
-            <i class="bi bi-shield-exclamation"></i>SÃ©curitÃ©
+            <i class="bi bi-shield-exclamation"></i>Sécurité
           </a>
         </li>
         <li class="nav-item">
           <a class="nav-link" data-bs-toggle="tab" href="#tab-regulatory">
-            <i class="bi bi-building-check"></i>RÃ©glementaire EU/CH
+            <i class="bi bi-building-check"></i>Réglementaire EU/CH
           </a>
         </li>
         <li class="nav-item">
@@ -773,19 +773,19 @@
         </li>
         <li class="nav-item">
           <a class="nav-link" data-bs-toggle="tab" href="#tab-market">
-            <i class="bi bi-graph-up"></i>MarchÃ©
+            <i class="bi bi-graph-up"></i>Marché
           </a>
         </li>
         <li class="nav-item">
           <a class="nav-link" data-bs-toggle="tab" href="#tab-raw">
-            <i class="bi bi-database"></i>DonnÃ©es
+            <i class="bi bi-database"></i>Données
           </a>
         </li>
       </ul>
 
       <div class="tab-content">
 
-        <!-- --- TAB: SÃCURITÃ --- -->
+        <!-- --- TAB: SÉCURITÉ --- -->
         <div class="tab-pane fade show active" id="tab-safety">
 
           <!-- KPIs row -->
@@ -800,7 +800,7 @@
             <div class="col">
               <div class="metric-box">
                 <div class="metric-value" id="m-deaths">-</div>
-                <div class="metric-label">DÃ©cÃ¨s rapportÃ©s</div>
+                <div class="metric-label">Décès rapportés</div>
                 <div class="metric-sub">FDA FAERS</div>
               </div>
             </div>
@@ -834,13 +834,13 @@
 
           <!-- Signals & alerts -->
           <div id="flags-section" style="display:none">
-            <div class="section-heading"><i class="bi bi-exclamation-triangle"></i>Alertes & signaux dÃ©tectÃ©s</div>
+            <div class="section-heading"><i class="bi bi-exclamation-triangle"></i>Alertes & signaux détectés</div>
             <div id="flags-container"></div>
           </div>
 
           <!-- Top reactions -->
           <div id="reactions-section" style="display:none">
-            <div class="section-heading"><i class="bi bi-list-ol"></i>Top 10 effets indÃ©sirables (MedDRA PT) - FDA FAERS</div>
+            <div class="section-heading"><i class="bi bi-list-ol"></i>Top 10 effets indésirables (MedDRA PT) - FDA FAERS</div>
             <div id="reactions-chart"></div>
           </div>
 
@@ -850,7 +850,7 @@
             <span id="m-pubmed-recent"></span>
           </div>
 
-          <!-- Regulatory overview removed: deduplicated with RÃ©glementaire EU/CH tab -->
+          <!-- Regulatory overview removed: deduplicated with Réglementaire EU/CH tab -->
 
         </div><!-- /tab-safety -->
 
@@ -858,11 +858,11 @@
         <div class="tab-pane fade" id="tab-regulatory">
 
           <!-- EMA SECTION -->
-          <div class="reg-source-tag"><i class="bi bi-building"></i>EMA - Union EuropÃ©enne</div>
+          <div class="reg-source-tag"><i class="bi bi-building"></i>EMA - Union Européenne</div>
 
           <div id="ema-loading" style="text-align:center;padding:24px;color:var(--text-muted);display:none">
             <div class="spinner" style="width:28px;height:28px;margin:0 auto 10px"></div>
-            Interrogation des donnÃ©es officielles EMAâ¦
+            Interrogation des données officielles EMA…
           </div>
           <div id="ema-error" style="display:none" class="flag-item flag-warning">
             <i class="bi bi-exclamation-triangle"></i>
@@ -903,12 +903,12 @@
             <div id="ema-prac-alert" style="display:none" class="flag-item flag-danger mb-2">
               <i class="bi bi-exclamation-circle-fill"></i>
               <div style="flex:1">
-                <div class="flag-label" id="ema-prac-alert-title">ProcÃ©dure PRAC active dÃ©tectÃ©e</div>
+                <div class="flag-label" id="ema-prac-alert-title">Procédure PRAC active détectée</div>
                 <div class="flag-detail" id="ema-prac-alert-detail"></div>
                 <div id="ema-prac-meta" style="font-size:0.72rem;color:#b91c1c;margin-top:4px"></div>
                 <div id="ema-prac-alert-link" style="display:none;margin-top:4px">
                   <a id="ema-prac-link" href="#" target="_blank" style="color:var(--danger);font-size:0.78rem;font-weight:600">
-                    - Voir la procÃ©dure sur ema.europa.eu -
+                    - Voir la procédure sur ema.europa.eu -
                   </a>
                 </div>
               </div>
@@ -917,13 +917,13 @@
             <div id="ema-no-prac" style="display:none" class="flag-item flag-success">
               <i class="bi bi-check-circle-fill"></i>
               <div>
-                <div class="flag-label" style="color:var(--success)">Aucun referral PRAC trouvÃ©</div>
-                <div class="flag-detail">Aucune procÃ©dure de sÃ©curitÃ© EMA rÃ©pertoriÃ©e pour cette substance.</div>
+                <div class="flag-label" style="color:var(--success)">Aucun referral PRAC trouvé</div>
+                <div class="flag-detail">Aucune procédure de sécurité EMA répertoriée pour cette substance.</div>
               </div>
             </div>
 
             <div id="ema-all-referrals-section" style="display:none;margin-top:14px">
-              <div class="section-heading"><i class="bi bi-list-check"></i>Toutes les procÃ©dures EMA</div>
+              <div class="section-heading"><i class="bi bi-list-check"></i>Toutes les procédures EMA</div>
               <div id="ema-all-referrals-list"></div>
             </div>
 
@@ -938,16 +938,16 @@
             </div>
 
             <div id="ema-products-section" style="display:none;margin-top:14px">
-              <div class="section-heading"><i class="bi bi-capsule"></i>Produits autorisÃ©s (EMA - UE)</div>
+              <div class="section-heading"><i class="bi bi-capsule"></i>Produits autorisés (EMA - UE)</div>
               <table class="data-table">
-                <thead><tr><th>MÃ©dicament</th><th>Titulaire AMM</th><th>Statut</th></tr></thead>
+                <thead><tr><th>Médicament</th><th>Titulaire AMM</th><th>Statut</th></tr></thead>
                 <tbody id="ema-products-body"></tbody>
               </table>
             </div>
 
             <div class="info-box mt-3">
               <i class="bi bi-info-circle"></i>
-              <strong>Source :</strong> EMA JSON Data Files officiels (mis Ã  jour 2x par jour) -
+              <strong>Source :</strong> EMA JSON Data Files officiels (mis à jour 2x par jour) -
               <a id="ema-search-link" href="#" target="_blank" style="color:var(--accent)">Rechercher sur ema.europa.eu</a>
               &nbsp;-&nbsp;
               <a href="https://www.adrreports.eu" target="_blank" style="color:var(--accent)">EudraVigilance (ADRs EU)</a>
@@ -955,7 +955,7 @@
           </div>
 
           <div id="ema-pending" style="text-align:center;padding:24px;color:var(--text-muted)">
-            <i class="bi bi-arrow-up-circle" style="margin-right:4px"></i>Lancez une analyse ci-dessus pour afficher les donnÃ©es EMA.
+            <i class="bi bi-arrow-up-circle" style="margin-right:4px"></i>Lancez une analyse ci-dessus pour afficher les données EMA.
           </div>
 
           <!-- DIVIDER -->
@@ -966,7 +966,7 @@
 
           <div id="swiss-loading" style="text-align:center;padding:24px;color:var(--text-muted);display:none">
             <div class="spinner" style="width:28px;height:28px;margin:0 auto 10px"></div>
-            Interrogation de Swissmedicâ¦
+            Interrogation de Swissmedic…
           </div>
           <div id="swiss-error" style="display:none" class="flag-item flag-warning">
             <i class="bi bi-exclamation-triangle"></i>
@@ -977,8 +977,8 @@
               <div class="col-4">
                 <div class="metric-box">
                   <div class="metric-value" id="m-swiss-total">-</div>
-                  <div class="metric-label">Produits autorisÃ©s CH</div>
-                  <div class="metric-sub" id="m-swiss-total-sub">MarchÃ© suisse</div>
+                  <div class="metric-label">Produits autorisés CH</div>
+                  <div class="metric-sub" id="m-swiss-total-sub">Marché suisse</div>
                 </div>
               </div>
               <div class="col-4">
@@ -1000,12 +1000,12 @@
             <div id="swiss-pv-alert" style="display:none" class="flag-item flag-warning mb-2">
               <i class="bi bi-bell-fill"></i>
               <div>
-                <div class="flag-label">Alerte pharmacovigilance Swissmedic dÃ©tectÃ©e</div>
-                <div class="flag-detail" id="swiss-pv-detail">Cette substance est mentionnÃ©e dans les Vigilance News de Swissmedic.</div>
+                <div class="flag-label">Alerte pharmacovigilance Swissmedic détectée</div>
+                <div class="flag-detail" id="swiss-pv-detail">Cette substance est mentionnée dans les Vigilance News de Swissmedic.</div>
               </div>
             </div>
 
-            <!-- Produit de rÃ©fÃ©rence plausible -->
+            <!-- Produit de référence plausible -->
             <div id="swiss-reference-section" style="display:none;margin-top:10px">
               <div id="swiss-reference-box" style="display:flex;align-items:center;gap:8px;padding:10px 14px;border-radius:8px;font-size:0.82rem"></div>
             </div>
@@ -1038,7 +1038,7 @@
             </div>
           </div>
           <div id="swiss-pending" style="text-align:center;padding:24px;color:var(--text-muted)">
-            <i class="bi bi-arrow-up-circle" style="margin-right:4px"></i>Lancez une analyse ci-dessus pour afficher les donnÃ©es Swissmedic.
+            <i class="bi bi-arrow-up-circle" style="margin-right:4px"></i>Lancez une analyse ci-dessus pour afficher les données Swissmedic.
           </div>
 
         </div><!-- /tab-regulatory -->
@@ -1050,7 +1050,7 @@
             <div class="col-4">
               <div class="metric-box">
                 <div class="metric-value" id="m-generics">-</div>
-                <div class="metric-label">GÃ©nÃ©riques approuvÃ©s</div>
+                <div class="metric-label">Génériques approuvés</div>
                 <div class="metric-sub">FDA (ANDAs)</div>
               </div>
             </div>
@@ -1071,21 +1071,21 @@
 
           <!-- Originator / Reference product -->
           <div id="originator-section" style="display:none">
-            <div class="section-heading"><i class="bi bi-award"></i>Produit(s) de rÃ©fÃ©rence (NDA)</div>
+            <div class="section-heading"><i class="bi bi-award"></i>Produit(s) de référence (NDA)</div>
             <div id="originator-list"></div>
           </div>
 
           <!-- FDA manufacturers -->
           <div id="manufacturers-section" style="display:none">
-            <div class="section-heading"><i class="bi bi-buildings"></i>Fabricants identifiÃ©s (FDA Orange Book)</div>
+            <div class="section-heading"><i class="bi bi-buildings"></i>Fabricants identifiés (FDA Orange Book)</div>
             <div id="manufacturers-list"></div>
           </div>
 
           <!-- EU Products by territory -->
-          <div class="section-heading mt-3"><i class="bi bi-globe-europe-africa"></i>MarchÃ©s europÃ©ens</div>
+          <div class="section-heading mt-3"><i class="bi bi-globe-europe-africa"></i>Marchés européens</div>
           <div id="eu-products-loading" style="text-align:center;padding:16px;color:var(--text-muted);display:none">
             <div class="spinner" style="width:24px;height:24px;margin:0 auto 8px"></div>
-            Interrogation des bases europÃ©ennes...
+            Interrogation des bases européennes...
           </div>
           <div id="eu-products-error" style="display:none" class="flag-item flag-warning">
             <i class="bi bi-exclamation-triangle"></i>
@@ -1095,57 +1095,57 @@
             <div id="eu-territory-groups"></div>
           </div>
           <div id="eu-products-pending" style="padding:12px 14px;background:#fafbfc;border-radius:var(--radius);border:1px solid var(--border);font-size:0.82rem;color:var(--text-muted)">
-            <i class="bi bi-arrow-up-circle" style="margin-right:4px"></i>Lancez une analyse ci-dessus pour afficher les donnÃ©es europÃ©ennes.
+            <i class="bi bi-arrow-up-circle" style="margin-right:4px"></i>Lancez une analyse ci-dessus pour afficher les données européennes.
           </div>
 
           <div class="info-box mt-3">
             <i class="bi bi-info-circle"></i>
-            DonnÃ©es FDA : <strong>FDA Orange Book</strong> (marchÃ© amÃ©ricain).
-            DonnÃ©es EU : bases officielles FR, ES, PT, BE.
+            Données FDA : <strong>FDA Orange Book</strong> (marché américain).
+            Données EU : bases officielles FR, ES, PT, BE.
           </div>
         </div><!-- /tab-comp -->
 
-        <!-- --- TAB: MARCHÃ --- -->
+        <!-- --- TAB: MARCHÉ --- -->
         <div class="tab-pane fade" id="tab-market">
           <div id="market-no-data" style="text-align:center;padding:36px 20px;color:var(--text-muted)">
             <i class="bi bi-file-earmark-excel" style="font-size:2.5rem;display:block;margin-bottom:12px;opacity:0.4"></i>
-            <div style="font-weight:600;margin-bottom:6px;color:var(--text)">Aucune donnÃ©e marchÃ© fournie</div>
+            <div style="font-weight:600;margin-bottom:6px;color:var(--text)">Aucune donnée marché fournie</div>
             <div style="font-size:0.85rem;max-width:400px;margin:0 auto">
-              Uploadez un export IQVIA (.xlsx) pour obtenir un score marchÃ© basÃ© sur vos donnÃ©es rÃ©elles.
+              Uploadez un export IQVIA (.xlsx) pour obtenir un score marché basé sur vos données réelles.
             </div>
             <div class="info-box mt-3" style="max-width:360px;margin:16px auto 0;text-align:left">
               <i class="bi bi-info-circle"></i>
-              Score marchÃ© actuel : <strong>5.0 / 10 (neutre)</strong> - ne pÃ©nalise pas l'analyse            </div>
+              Score marché actuel : <strong>5.0 / 10 (neutre)</strong> - ne pénalise pas l'analyse            </div>
           </div>
           <div id="market-data-section" style="display:none">
             <div class="row g-2 mb-3">
               <div class="col-6">
                 <div class="metric-box">
                   <div class="metric-value" id="m-mkt-value">-</div>
-                  <div class="metric-label">Valeur totale du marchÃ©</div>
+                  <div class="metric-label">Valeur totale du marché</div>
                   <div class="metric-sub">CHF (source IQVIA)</div>
                 </div>
               </div>
               <div class="col-6">
                 <div class="metric-box">
                   <div class="metric-value" id="m-mkt-growth">-</div>
-                  <div class="metric-label">Croissance marchÃ© (moy.)</div>
+                  <div class="metric-label">Croissance marché (moy.)</div>
                   <div class="metric-sub">source IQVIA</div>
                 </div>
               </div>
             </div>
             <div id="market-warnings"></div>
             <div id="top-products-section" style="display:none">
-              <div class="section-heading"><i class="bi bi-trophy"></i>Top produits du marchÃ©</div>
+              <div class="section-heading"><i class="bi bi-trophy"></i>Top produits du marché</div>
               <table class="data-table">
                 <thead><tr><th>Produit</th><th style="text-align:right">Valeur (CHF)</th></tr></thead>
                 <tbody id="top-products-body"></tbody>
               </table>
             </div>
             <div id="detected-cols-section" class="mt-3">
-              <div class="section-heading"><i class="bi bi-table"></i>Colonnes dÃ©tectÃ©es automatiquement</div>
+              <div class="section-heading"><i class="bi bi-table"></i>Colonnes détectées automatiquement</div>
               <table class="data-table">
-                <thead><tr><th>CatÃ©gorie</th><th>Colonne Excel dÃ©tectÃ©e</th></tr></thead>
+                <thead><tr><th>Catégorie</th><th>Colonne Excel détectée</th></tr></thead>
                 <tbody id="detected-cols-body"></tbody>
               </table>
             </div>
@@ -1155,11 +1155,11 @@
         <!-- --- TAB: DONN-ES --- -->
         <div class="tab-pane fade" id="tab-raw">
           <div style="font-size:0.82rem">
-            <div class="section-heading"><i class="bi bi-shield-check"></i>FDA FAERS - Effets indÃ©sirables</div>
+            <div class="section-heading"><i class="bi bi-shield-check"></i>FDA FAERS - Effets indésirables</div>
             <pre id="raw-faers" style="background:#f8fafc;border-radius:var(--radius);padding:12px;font-size:0.72rem;max-height:180px;overflow:auto;border:1px solid var(--border);color:var(--text-muted)"></pre>
-            <div class="section-heading mt-2"><i class="bi bi-capsule"></i>FDA Orange Book - GÃ©nÃ©riques</div>
+            <div class="section-heading mt-2"><i class="bi bi-capsule"></i>FDA Orange Book - Génériques</div>
             <pre id="raw-generics" style="background:#f8fafc;border-radius:var(--radius);padding:12px;font-size:0.72rem;max-height:180px;overflow:auto;border:1px solid var(--border);color:var(--text-muted)"></pre>
-            <div class="section-heading mt-2"><i class="bi bi-journals"></i>PubMed NCBI - LittÃ©rature</div>
+            <div class="section-heading mt-2"><i class="bi bi-journals"></i>PubMed NCBI - Littérature</div>
             <pre id="raw-pubmed" style="background:#f8fafc;border-radius:var(--radius);padding:12px;font-size:0.72rem;max-height:180px;overflow:auto;border:1px solid var(--border);color:var(--text-muted)"></pre>
           </div>
         </div><!-- /tab-raw -->
@@ -1170,7 +1170,7 @@
     <!-- Export -->
     <div class="text-end mb-4">
       <button class="btn-export" onclick="exportReport()">
-        <i class="bi bi-download"></i>TÃ©lÃ©charger le rapport
+        <i class="bi bi-download"></i>Télécharger le rapport
       </button>
     </div>
 
@@ -1250,7 +1250,7 @@ function resetResults() {
   hide('swiss-pv-alert'); hide('swiss-products-section');
   hide('swiss-reference-section'); hide('swiss-combi-section');
   document.getElementById('m-swiss-total').textContent = '-';
-  document.getElementById('m-swiss-total-sub').textContent = 'MarchÃ© suisse';
+  document.getElementById('m-swiss-total-sub').textContent = 'Marché suisse';
   document.getElementById('m-swiss-pv').textContent = '-';
   document.getElementById('m-swiss-pv').style.color = '';
   const _swHolders = document.getElementById('m-swiss-holders');
@@ -1318,7 +1318,7 @@ async function fetchEUProducts(substance) {
     hide('eu-products-loading');
     show('eu-products-error');
     document.getElementById('eu-products-error-text').textContent =
-      `DonnÃ©es EU indisponibles : ${e.message}`;
+      `Données EU indisponibles : ${e.message}`;
   }
 }
 
@@ -1326,10 +1326,10 @@ async function fetchEUProducts(substance) {
 window._swissmedicProducts = null;
 
 const TERRITORY_LABELS = {
-  fr: { name: 'France', flag: 'ð«ð·', source: 'BDPM / ANSM' },
-  es: { name: 'Espagne', flag: 'ðªð¸', source: 'CIMA / AEMPS' },
-  pt: { name: 'Portugal', flag: 'ðµð¹', source: 'INFARMED' },
-  be: { name: 'Belgique', flag: 'ð§ðª', source: 'SAM / CBIP' }
+  fr: { name: 'France', flag: '🇫🇷', source: 'BDPM / ANSM' },
+  es: { name: 'Espagne', flag: '🇪🇸', source: 'CIMA / AEMPS' },
+  pt: { name: 'Portugal', flag: '🇵🇹', source: 'INFARMED' },
+  be: { name: 'Belgique', flag: '🇧🇪', source: 'SAM / CBIP' }
 };
 
 function renderEUProducts(results) {
@@ -1356,19 +1356,19 @@ function renderEUProducts(results) {
     if (data.error && items.length === 0) {
       html += `<div class="flag-item flag-secondary" style="margin:0 0 4px">
         <i class="bi bi-info-circle"></i>
-        <span style="font-size:0.78rem;color:var(--text-muted)">${data.error.includes('timeout') ? 'DÃ©lai dÃ©passÃ© - donnÃ©es temporairement indisponibles' : 'Source indisponible : ' + data.error}</span>
+        <span style="font-size:0.78rem;color:var(--text-muted)">${data.error.includes('timeout') ? 'Délai dépassé - données temporairement indisponibles' : 'Source indisponible : ' + data.error}</span>
       </div>`;
     } else if (items.length === 0) {
       html += `<div style="padding:8px 12px;font-size:0.78rem;color:var(--text-muted)">
-        Aucun produit identifiÃ© sur ce marchÃ©.
+        Aucun produit identifié sur ce marché.
       </div>`;
     } else {
-      html += `<table class="data-table" style="margin-bottom:0"><thead><tr><th>MÃ©dicament</th><th>Titulaire</th><th>Statut</th></tr></thead><tbody>`;
+      html += `<table class="data-table" style="margin-bottom:0"><thead><tr><th>Médicament</th><th>Titulaire</th><th>Statut</th></tr></thead><tbody>`;
       items.slice(0, 12).forEach(p => {
-        html += `<tr><td>${p.name||'-'}</td><td style="color:var(--text-muted)">${p.holder||'-'}</td><td style="color:var(--text-muted)">${p.status||'AutorisÃ©'}</td></tr>`;
+        html += `<tr><td>${p.name||'-'}</td><td style="color:var(--text-muted)">${p.holder||'-'}</td><td style="color:var(--text-muted)">${p.status||'Autorisé'}</td></tr>`;
       });
       if (items.length > 12) {
-        html += `<tr><td colspan="3" style="color:var(--text-subtle);font-size:0.72rem;text-align:center">+${items.length - 12} produits supplÃ©mentaires</td></tr>`;
+        html += `<tr><td colspan="3" style="color:var(--text-subtle);font-size:0.72rem;text-align:center">+${items.length - 12} produits supplémentaires</td></tr>`;
       }
       html += `</tbody></table>`;
     }
@@ -1390,17 +1390,17 @@ function injectCHGroup() {
   if (existing) existing.remove();
   const chHtml = `<div class="territory-group" id="ch-territory-group">
     <div class="territory-header" data-bs-toggle="collapse" data-bs-target="#territory-collapse-ch">
-      <span>ð¨ð­ Suisse (CH)</span>
+      <span>🇨🇭 Suisse (CH)</span>
       <span style="font-size:0.72rem;color:var(--text-muted);font-weight:400">Swissmedic</span>
       <span class="count-badge">${products.length > 0 ? products.length + ' produit' + (products.length > 1 ? 's' : '') : 'Aucun'}</span>
     </div>
     <div class="collapse show" id="territory-collapse-ch">
       ${products.length > 0
-        ? `<table class="data-table" style="margin-bottom:0"><thead><tr><th>MÃ©dicament</th><th>Titulaire</th></tr></thead><tbody>
+        ? `<table class="data-table" style="margin-bottom:0"><thead><tr><th>Médicament</th><th>Titulaire</th></tr></thead><tbody>
             ${products.slice(0, 12).map(p => `<tr><td>${p.name || '-'}</td><td style="color:var(--text-muted)">${p.holder || '-'}</td></tr>`).join('')}
-            ${products.length > 12 ? `<tr><td colspan="2" style="color:var(--text-subtle);font-size:0.72rem;text-align:center">+${products.length - 12} produits supplÃ©mentaires</td></tr>` : ''}
+            ${products.length > 12 ? `<tr><td colspan="2" style="color:var(--text-subtle);font-size:0.72rem;text-align:center">+${products.length - 12} produits supplémentaires</td></tr>` : ''}
            </tbody></table>`
-        : '<div style="padding:8px 12px;font-size:0.78rem;color:var(--text-muted)">Aucun produit identifiÃ© sur ce marchÃ©.</div>'
+        : '<div style="padding:8px 12px;font-size:0.78rem;color:var(--text-muted)">Aucun produit identifié sur ce marché.</div>'
       }
     </div>
   </div>`;
@@ -1462,7 +1462,7 @@ function triggerRxNorm(val) {
     return;
   }
 
-  // AprÃ¨s 400ms sans frappe : cherche suggestions + correction
+  // Après 400ms sans frappe : cherche suggestions + correction
   rxnormTimer = setTimeout(() => fetchRxNormSuggestions(trimmed), 400);
 }
 
@@ -1483,13 +1483,13 @@ async function fetchRxNormSuggestions(term) {
     const inputVal = document.getElementById('substance-input').value.trim().toLowerCase();
     const firstSuggestion = suggestions[0].toLowerCase();
 
-    // Si la premiÃ¨re suggestion diff-re de ce que l'utilisateur a tapÃ© -- correction
+    // Si la première suggestion diff-re de ce que l'utilisateur a tapé -- correction
     if (firstSuggestion !== inputVal) {
       currentSuggestion = suggestions[0];
       document.getElementById('rxnorm-suggestion-text').textContent = suggestions[0];
       document.getElementById('rxnorm-suggestion').style.display = 'block';
     } else {
-      // Nom dÃ©jÃ  correct -- badge validÃ©
+      // Nom déjà correct -- badge validé
       document.getElementById('rxnorm-validated-text').textContent = suggestions[0];
       document.getElementById('rxnorm-validated').style.display = 'block';
       currentSuggestion = suggestions[0];
@@ -1501,7 +1501,7 @@ async function fetchRxNormSuggestions(term) {
         <div onclick="selectSuggestion('${s}')"
              style="padding:9px 14px; cursor:pointer; font-size:0.88rem; border-bottom:1px solid #f1f5f9;                    ${i === 0 ? 'font-weight:600; color:var(--accent)' : 'color:var(--text)'}"
              onmouseover="this.style.background='#f0f7ff'" onmouseout="this.style.background='white'">
-          ${i === 0 ? 'â­ ' : ''}${s}
+          ${i === 0 ? '⭐ ' : ''}${s}
         </div>
       `).join('');
       dropdown.style.display =
@@ -1563,7 +1563,7 @@ function updateWeights() {
   const el = document.getElementById('weight-status');
   if (Math.abs(total - 100) > 5) {
     el.className = 'weight-warning';
-    el.textContent = `---- Somme : ${total}% (sera normalisÃ©e automatiquement)`;
+    el.textContent = `---- Somme : ${total}% (sera normalisée automatiquement)`;
   } else {
     el.className = 'weight-ok';
     el.textContent = `-- Somme des poids : ${total}%`;
@@ -1587,7 +1587,7 @@ function handleFileSelect(input) {
     iqviaFile = input.files[0];
     const zone = document.getElementById('upload-zone');
     zone.classList.add('has-file');
-    document.getElementById('upload-text').textContent = 'ð ' + iqviaFile.name;
+    document.getElementById('upload-text').textContent = '📎 ' + iqviaFile.name;
   }
 }
 
@@ -1598,7 +1598,7 @@ function handleDrop(e) {
     iqviaFile = file;
     const zone = document.getElementById('upload-zone');
     zone.classList.add('has-file');
-    document.getElementById('upload-text').textContent = 'ð ' + file.name;
+    document.getElementById('upload-text').textContent = '📎 ' + file.name;
   }
 }
 
@@ -1721,11 +1721,11 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 const COL_KEYWORDS = {
   market_value: ['chiffre','vente','value','valeur','ca ','c.a.','revenue','sales','umsatz','chf','eur','usd','montant','amount'],
-  volume: ['volume','unitÃ©','unite','units','bo-te','boite','pack','quantity','quantitÃ©','pieces'],
-  market_share: ['part de marchÃ©','market share','share','part','anteil','quota','ms%'],
+  volume: ['volume','unité','unite','units','bo-te','boite','pack','quantity','quantité','pieces'],
+  market_share: ['part de marché','market share','share','part','anteil','quota','ms%'],
   growth: ['croissance','growth','variation','trend','evol','wachstum','change','delta','vs','yoy'],
   product: ['produit','product','nom','name','bezeichnung','article','molecule','brand','marque'],
-  period: ['pÃ©riode','period','mois','month','annÃ©e','year','date','datum','quarter','trimestre']
+  period: ['période','period','mois','month','année','year','date','datum','quarter','trimestre']
 };
 
 function detectColumn(headers, category) {
@@ -1784,8 +1784,8 @@ async function parseIQVIA(file) {
         }
 
         const warnings = [];
-        if (!detected.market_value) warnings.push('Colonne valeur marchÃ© non dÃ©tectÃ©e automatiquement');
-        if (!detected.product) warnings.push('Colonne produit non dÃ©tectÃ©e automatiquement');
+        if (!detected.market_value) warnings.push('Colonne valeur marché non détectée automatiquement');
+        if (!detected.product) warnings.push('Colonne produit non détectée automatiquement');
 
         resolve({
           parseSuccess: true,
@@ -1820,25 +1820,25 @@ function calcSafety(faers, pubmed) {
     const sRate = serious / total;
     const dRate = deaths / total;
 
-    if (sRate > 0.70) { score -= 2.5; flags.push({level:'danger', emoji:'ð¨', text:'Taux d\'Ã©vÃ©nements graves trÃ¨s Ã©levÃ©', detail: pct(sRate) + ' des rapports'}); }
-    else if (sRate > 0.50) { score -= 1.5; flags.push({level:'warning', emoji:'â ï¸', text:'Taux d\'Ã©vÃ©nements graves Ã©levÃ©', detail: pct(sRate) + ' des rapports'}); }
-    else if (sRate > 0.30) { score -= 0.75; flags.push({level:'info', emoji:'â¹ï¸', text:'Taux d\'Ã©vÃ©nements graves modÃ©rÃ©', detail: pct(sRate) + ' des rapports'}); }
+    if (sRate > 0.70) { score -= 2.5; flags.push({level:'danger', emoji:'🚨', text:'Taux d\'événements graves très élevé', detail: pct(sRate) + ' des rapports'}); }
+    else if (sRate > 0.50) { score -= 1.5; flags.push({level:'warning', emoji:'⚠️', text:'Taux d\'événements graves élevé', detail: pct(sRate) + ' des rapports'}); }
+    else if (sRate > 0.30) { score -= 0.75; flags.push({level:'info', emoji:'ℹ️', text:'Taux d\'événements graves modéré', detail: pct(sRate) + ' des rapports'}); }
 
-    if (dRate > 0.10) { score -= 2.0; flags.push({level:'danger', emoji:'ð¨', text:'Taux de dÃ©cÃ¨s rapportÃ©s Ã©levÃ©', detail: pct(dRate) + ' des rapports'}); }
-    else if (dRate > 0.05) { score -= 1.0; flags.push({level:'warning', emoji:'â ï¸', text:'Taux de dÃ©cÃ¨s rapportÃ©s notable', detail: pct(dRate) + ' des rapports'}); }
-    else if (dRate > 0.01) { score -= 0.5; flags.push({level:'info', emoji:'â¹ï¸', text:'DÃ©cÃ¨s rapportÃ©s â ï¸ Ã  surveiller', detail: pct(dRate) + ' des rapports'}); }
+    if (dRate > 0.10) { score -= 2.0; flags.push({level:'danger', emoji:'🚨', text:'Taux de décès rapportés élevé', detail: pct(dRate) + ' des rapports'}); }
+    else if (dRate > 0.05) { score -= 1.0; flags.push({level:'warning', emoji:'⚠️', text:'Taux de décès rapportés notable', detail: pct(dRate) + ' des rapports'}); }
+    else if (dRate > 0.01) { score -= 0.5; flags.push({level:'info', emoji:'ℹ️', text:'Décès rapportés ⚠️ à surveiller', detail: pct(dRate) + ' des rapports'}); }
 
-    if (total > 100000) { score -= 0.75; flags.push({level:'info', emoji:'â¹ï¸', text:'Volume trÃ¨s Ã©levÃ© de rapports FAERS', detail: fmt(total) + ' cas cumulÃ©s'}); }
-    else if (total > 50000) { score -= 0.25; flags.push({level:'info', emoji:'â¹ï¸', text:'Volume Ã©levÃ© de rapports FAERS', detail: fmt(total) + ' cas cumulÃ©s'}); }
+    if (total > 100000) { score -= 0.75; flags.push({level:'info', emoji:'ℹ️', text:'Volume très élevé de rapports FAERS', detail: fmt(total) + ' cas cumulés'}); }
+    else if (total > 50000) { score -= 0.25; flags.push({level:'info', emoji:'ℹ️', text:'Volume élevé de rapports FAERS', detail: fmt(total) + ' cas cumulés'}); }
   } else {
-    flags.push({level:'secondary', emoji:'ð¬', text:'Aucun rapport FAERS trouvÃ©', detail:'Substance nouvelle ou donnÃ©es insuffisantes dans la base FDA'});
+    flags.push({level:'secondary', emoji:'💬', text:'Aucun rapport FAERS trouvé', detail:'Substance nouvelle ou données insuffisantes dans la base FDA'});
   }
 
   const recent = pubmed.recentSafetyPublications;
-  if (recent > 150) { score -= 1.5; flags.push({level:'danger', emoji:'ð¨', text:'ActivitÃ© sÃ©curitÃ© trÃ¨s forte dans la littÃ©rature rÃ©cente', detail: recent + ' publications (2023-2026) â possible signal actif'}); }
-  else if (recent > 75) { score -= 0.75; flags.push({level:'warning', emoji:'â ï¸', text:'ActivitÃ© sÃ©curitÃ© notable dans la littÃ©rature rÃ©cente', detail: recent + ' publications (2023-2026)'}); }
+  if (recent > 150) { score -= 1.5; flags.push({level:'danger', emoji:'🚨', text:'Activité sécurité très forte dans la littérature récente', detail: recent + ' publications (2023-2026) – possible signal actif'}); }
+  else if (recent > 75) { score -= 0.75; flags.push({level:'warning', emoji:'⚠️', text:'Activité sécurité notable dans la littérature récente', detail: recent + ' publications (2023-2026)'}); }
   else if (recent > 30) { score -= 0.25; flags.push({level:'info',
- emoji:'â¹ï¸', text:'ActivitÃ© sÃ©curitÃ© modÃ©rÃ©e dans la littÃ©rature rÃ©cente', detail: recent + ' publications (2023-2026)'}); }
+ emoji:'ℹ️', text:'Activité sécurité modérée dans la littérature récente', detail: recent + ' publications (2023-2026)'}); }
 
   score = Math.max(0, Math.min(10, Math.round(score * 10) / 10));
   return {
@@ -1855,18 +1855,18 @@ function calcSafety(faers, pubmed) {
 function calcCompetition(gen) {
   const n = gen.genericApprovals;
   let score, level, emoji;
-  if (n === 0)       { score=9.0; level='MarchÃ© non encore gÃ©nÃ©rifiÃ© (FDA)'; emoji='ð¢'; }
-  else if (n <= 2)   { score=8.0; level='TrÃ¨s peu de concurrents gÃ©nÃ©riques'; emoji='ð¡'; }
-  else if (n <= 5)   { score=6.5; level='Concurrence modÃ©rÃ©e'; emoji='ð¡'; }
-  else if (n <= 10)  { score=4.5; level='MarchÃ© compÃ©titif'; emoji='ð '; }
-  else if (n <= 20)  { score=2.5; level='MarchÃ© trÃ¨s compÃ©titif'; emoji='ð´'; }
-  else               { score=1.0; level='MarchÃ© saturÃ© â nombreux gÃ©nÃ©riques'; emoji='ð´'; }
+  if (n === 0)       { score=9.0; level='Marché non encore générifié (FDA)'; emoji='🟢'; }
+  else if (n <= 2)   { score=8.0; level='Très peu de concurrents génériques'; emoji='🟡'; }
+  else if (n <= 5)   { score=6.5; level='Concurrence modérée'; emoji='🟡'; }
+  else if (n <= 10)  { score=4.5; level='Marché compétitif'; emoji='🟠'; }
+  else if (n <= 20)  { score=2.5; level='Marché très compétitif'; emoji='🔴'; }
+  else               { score=1.0; level='Marché saturé – nombreux génériques'; emoji='🔴'; }
   return { score, n, nda: gen.ndaApprovals, level, emoji, manufacturers: gen.manufacturers, originators: gen.originators || [] };
 }
 
 function calcMarket(iqvia) {
   if (!iqvia || !iqvia.parseSuccess) {
-    return { score:5.0, source:'estimÃ©', message:'Score neutre -- pas de donnÃ©es IQVIA' };
+    return { score:5.0, source:'estimé', message:'Score neutre -- pas de données IQVIA' };
   }
   let score = 5.0;
   const val = iqvia.totalMarketValueCHF;
@@ -1896,10 +1896,10 @@ function calcComposite(safety, comp, market, ws, wc, wm) {
   ws /= total; wc /= total; wm /= total;
   const score = Math.round((safety.score*ws + comp.score*wc + market.score*wm) * 10) / 10;
   let rec, recColor, recDetail;
-  if (score >= 7.5)      { rec='â RECOMMANDÃ';         recColor='#10b981'; recDetail='Profil d\'investissement attractif'; }
-  else if (score >= 5.5) { rec='â ï¸ ÃVALUER';            recColor='#f59e0b'; recDetail='Potentiel modÃ©rÃ© â approfondissement recommandÃ©'; }
-  else if (score >= 3.5) { rec='ð¶ PRUDENCE';           recColor='#f97316'; recDetail='Facteurs de risque significatifs identifiÃ©s'; }
-  else                   { rec='â NON RECOMMANDÃ';     recColor='#ef4444'; recDetail='Rapport bÃ©nÃ©fice/risque d\'investissement dÃ©favorable'; }
+  if (score >= 7.5)      { rec='✅ RECOMMANDÉ';         recColor='#10b981'; recDetail='Profil d\'investissement attractif'; }
+  else if (score >= 5.5) { rec='⚠️ ÉVALUER';            recColor='#f59e0b'; recDetail='Potentiel modéré – approfondissement recommandé'; }
+  else if (score >= 3.5) { rec='🔶 PRUDENCE';           recColor='#f97316'; recDetail='Facteurs de risque significatifs identifiés'; }
+  else                   { rec='❌ NON RECOMMANDÉ';     recColor='#ef4444'; recDetail='Rapport bénéfice/risque d\'investissement défavorable'; }
   return { score, rec, recColor, recDetail };
 }
 
@@ -1917,7 +1917,7 @@ function renderResults() {
   document.getElementById('score-number').textContent = cp.score;
   document.getElementById('score-rec').textContent = cp.rec;
   document.getElementById('score-detail').textContent = cp.recDetail;
-  document.getElementById('score-date').textContent = 'AnalysÃ© le ' + new Date().toLocaleDateString('fr-CH') + ' - ' + new Date().toLocaleTimeString('fr-CH', {hour:'2-digit', minute:'2-digit'});
+  document.getElementById('score-date').textContent = 'Analysé le ' + new Date().toLocaleDateString('fr-CH') + ' - ' + new Date().toLocaleTimeString('fr-CH', {hour:'2-digit', minute:'2-digit'});
 
   // Sub-scores
   ['safety', 'comp', 'market'].forEach((key, i) => {
@@ -1932,7 +1932,7 @@ function renderResults() {
     bar.className = 'sub-kpi-bar-fill';
     bar.style.backgroundColor = col;
   });
-  document.getElementById('market-source-label').textContent = ms.source === 'IQVIA' ? 'Source IQVIA' : 'Score estimÃ©';
+  document.getElementById('market-source-label').textContent = ms.source === 'IQVIA' ? 'Source IQVIA' : 'Score estimé';
 
   // Radar chart
   if (state.radarChart) state.radarChart.destroy();
@@ -1941,7 +1941,7 @@ function renderResults() {
 
     type: 'radar',
     data: {
-      labels: ['SÃ©curitÃ©', 'Concurrence', 'MarchÃ©'],
+      labels: ['Sécurité', 'Concurrence', 'Marché'],
       datasets: [{
         data: [sf.score, cs.score, ms.score],
         fill: true,
@@ -1995,7 +1995,7 @@ function renderResults() {
   const flagsSec = document.getElementById('flags-section');
   if (flagsSec) flagsSec.style.display = '';
   if (sf.flags.length === 0) {
-    flagsEl.innerHTML = '<div class="flag-item flag-success"><i class="bi bi-check-circle-fill"></i><div><div class="flag-label" style="color:var(--success)">Aucun signal de sÃ©curitÃ© majeur dÃ©tectÃ©</div><div class="flag-detail">Aucune alerte identifiÃ©e dans les sources publiques analysÃ©es.</div></div></div>';
+    flagsEl.innerHTML = '<div class="flag-item flag-success"><i class="bi bi-check-circle-fill"></i><div><div class="flag-label" style="color:var(--success)">Aucun signal de sécurité majeur détecté</div><div class="flag-detail">Aucune alerte identifiée dans les sources publiques analysées.</div></div></div>';
   } else {
     flagsEl.innerHTML = sf.flags.map(f => `
       <div class="flag-item flag-${f.level}">
@@ -2012,8 +2012,8 @@ function renderResults() {
   if (document.getElementById('reg-fda-status'
 )) {
     const _fda = sf.score < 5
-      ? { text: 'ð´ Signaux dÃ©tectÃ©s', color: '#ef4444', detail: fmt(faers.totalReports) + ' rapports FAERS' }
-      : { text: 'ð¢ Profil acceptable', color: '#10b981', detail: fmt(faers.totalReports) + ' rapports FAERS' };
+      ? { text: '🔴 Signaux détectés', color: '#ef4444', detail: fmt(faers.totalReports) + ' rapports FAERS' }
+      : { text: '🟢 Profil acceptable', color: '#10b981', detail: fmt(faers.totalReports) + ' rapports FAERS' };
     const _rfda = document.getElementById('reg-fda-status'); if(_rfda){ _rfda.textContent = _fda.text;
     _rfda.style.color = _fda.color; }
     const _rfdaD = document.getElementById('reg-fda-detail'); if(_rfdaD) _rfdaD.textContent = _fda.detail;
@@ -2030,7 +2030,7 @@ function renderResults() {
   if (cs.originators && cs.originators.length > 0) {
     document.getElementById('originator-section').style.display = 'block';
     document.getElementById('originator-list').innerHTML = cs.originators.map(o =>
-      `<span class="mfr-chip" style="background:#f0f4ff;border-color:#bfcfff;color:#1e40af"><i class="bi bi-award" style="margin-right:4px;font-size:0.75rem"></i>${o.brand} <span style="color:#64748b;font-weight:400;margin-left:4px">â ${o.sponsor}</span></span>`
+      `<span class="mfr-chip" style="background:#f0f4ff;border-color:#bfcfff;color:#1e40af"><i class="bi bi-award" style="margin-right:4px;font-size:0.75rem"></i>${o.brand} <span style="color:#64748b;font-weight:400;margin-left:4px">— ${o.sponsor}</span></span>`
     ).join('');
   } else {
     document.getElementById('originator-section').style.display = 'none';
@@ -2065,7 +2065,7 @@ div>`).join('');
     if (ms.detectedColumns) {
       document.getElementById('detected-cols-body').innerHTML = Object.entries(ms.detectedColumns
 ).map(([k,v]) =>
-        `<tr><td>${k}</td><td>${v ? 'â ï¸ ' + v : 'â Non dÃ©tectÃ©e'}</td></tr>`
+        `<tr><td>${k}</td><td>${v ? '⚠️ ' + v : '✅ Non détectée'}</td></tr>`
       ).join('');
     }
   }
@@ -2087,7 +2087,7 @@ async function analyze() {
   if (!substance) return;
 
   // Normalisation automatique via RxNorm avant l'analyse
-  setLoading(true, 'ð VÃ©rification du nom INN (RxNorm)...', 5);
+  setLoading(true, '🔍 Vérification du nom INN (RxNorm)...', 5);
   document.getElementById('analyze-btn').disabled = true;
   try {
     const r = await fetch(`https://rxnav.nlm.nih.gov/REST/spellingsuggestions.json?name=${encodeURIComponent(substance)}`);
@@ -2109,27 +2109,27 @@ async function analyze() {
   setResults(false);
 
   try {
-    setLoading(true, 'ð¡ FDA FAERS â effets indÃ©sirables...', 15);
+    setLoading(true, '📡 FDA FAERS – effets indésirables...', 15);
     state.faers = await fetchFAERS(substance);
 
-    setLoading(true, 'ð¡ FDA Orange Book â gÃ©nÃ©riques approuvÃ©s...', 40);
+    setLoading(true, '📡 FDA Orange Book – génériques approuvés...', 40);
     state.generics = await fetchGenerics(substance);
 
-    setLoading(true, 'ð¡ PubMed â littÃ©rature scientifique...', 62);
+    setLoading(true, '📡 PubMed – littérature scientifique...', 62);
     state.pubmed = await fetchPubMed(substance);
 
     state.iqvia = null;
     if (iqviaFile) {
-      setLoading(true, 'ð Analyse du fichier IQVIA...', 78);
+      setLoading(true, '📊 Analyse du fichier IQVIA...', 78);
       state.iqvia = await parseIQVIA(iqviaFile);
     }
 
-    // Lancer EMA + Swissmedic en parallÃ¨le (en arriÃ¨re-plan, sans bloquer l'affichage)
-    setLoading(true, 'ð Interrogation EMA & Swissmedic...', 85);
-    fetchEMA(substance);      // async, met Ã  jour les onglets EMA quand prÃªt
+    // Lancer EMA + Swissmedic en parallèle (en arrière-plan, sans bloquer l'affichage)
+    setLoading(true, '🌍 Interrogation EMA & Swissmedic...', 85);
+    fetchEMA(substance);      // async, met à jour les onglets EMA quand prêt
     fetchSwissmedic(substance); // async
-    fetchEUProducts(substance);  // async, updates EU territory groups, met Ã  jour l'onglet Swissmedic quand prÃªt
-    setLoading(true, 'âï¸ Calcul des scores...', 95);
+    fetchEUProducts(substance);  // async, updates EU territory groups, met à jour l'onglet Swissmedic quand prêt
+    setLoading(true, '⚙️ Calcul des scores...', 95);
     await sleep(200);
 
     const ws = parseInt(document.getElementById('w-safety').value);
@@ -2147,7 +2147,7 @@ async function analyze() {
 
   } catch(err) {
     setLoading(false);
-    alert('Erreur lors de l\'analyse : ' + err.message + '\nVÃ©rifiez votre connexion internet.');
+    alert('Erreur lors de l\'analyse : ' + err.message + '\nVérifiez votre connexion internet.');
     console.error(err);
   }
 
@@ -2168,51 +2168,51 @@ function exportReport() {
 // ----------------------------------------
 --           PHARMASCOUT -- RAPPORT D'ANALYSE               --// ------------------------------------------------------------------------------------------------------------------------
 
-Substance analysÃ©e  : ${substance.toUpperCase()}
-Date d'analyse      : ${now}Source marchÃ©       : ${ms.source === 'IQVIA' ? 'IQVIA (fichier fourni)' : 'Score estimÃ© (pas de donnÃ©es IQVIA)'}
+Substance analysée  : ${substance.toUpperCase()}
+Date d'analyse      : ${now}Source marché       : ${ms.source === 'IQVIA' ? 'IQVIA (fichier fourni)' : 'Score estimé (pas de données IQVIA)'}
 // --------------------------------------------------------------------------------------------------------------------
-SCORE COMPOSÃITE     : ${cp.score} / 10RECOMMANDATION      : ${cp.rec}
+SCORE COMPOSÉITE     : ${cp.score} / 10RECOMMANDATION      : ${cp.rec}
                       ${cp.recDetail}
 // --------------------------------------------------------------------------------------------------------------------
 
-SCORES DÃTAILLÃS
+SCORES DÉTAILLÉS
   ----  S-
 curit-     : ${sf.score} / 10
   ----  Concurrence  : ${cs.score} / 10
-  --  MarchÃ©       : ${ms.score} / 10 (${ms.source})
+  --  Marché       : ${ms.score} / 10 (${ms.source})
 
 // --------------------------------------------------------------------------------------------------------------------
-DONN-ES SÃCURITÃ (FDA FAERS)
+DONN-ES SÉCURITÉ (FDA FAERS)
   Total rapports      : ${fmt(faers.totalReports)}
-  Rapports sÃ©rieux    : ${fmt(faers.seriousReports)} (${faers.totalReports > 0 ? pct(sf.details.seriousRate) : 
+  Rapports sérieux    : ${fmt(faers.seriousReports)} (${faers.totalReports > 0 ? pct(sf.details.seriousRate) : 
 'N/A'})
-  DÃ©cÃ¨s rapportÃ©s     : ${fmt(faers.deathReports)} (${faers.totalReports > 0 ? pct(sf.details.deathRate) : 'N/A'})
+  Décès rapportés     : ${fmt(faers.deathReports)} (${faers.totalReports > 0 ? pct(sf.details.deathRate) : 'N/A'})
 
-ALERTES DÃTECTÃES
-${sf.flags.length === 0 ? '  Aucune alerte majeure dÃ©tectÃ©e.' : sf.flags.map(f => `  ${f.emoji} ${f.text} -- ${f.detail}`).join('\n')}
+ALERTES DÉTECTÉES
+${sf.flags.length === 0 ? '  Aucune alerte majeure détectée.' : sf.flags.map(f => `  ${f.emoji} ${f.text} -- ${f.detail}`).join('\n')}
 
-LITTÃRATURE (PubMed)
-  Publications sÃ©curitÃ©    : ${fmt(pubmed.safetyPublications)}
-  Publications rÃ©centes    : ${fmt(pubmed.recentSafetyPublications)} (2023-2026)
+LITTÉRATURE (PubMed)
+  Publications sécurité    : ${fmt(pubmed.safetyPublications)}
+  Publications récentes    : ${fmt(pubmed.recentSafetyPublications)} (2023-2026)
 
 // -----------------------------
 // --------------------------------------------------------------------------------------
 CONCURRENCE (FDA Orange Book)
-  GÃ©nÃ©riques approuvÃ©s     : ${cs.n} (ANDAs)
+  Génériques approuvés     : ${cs.n} (ANDAs)
   Produits originaux       : ${cs.nda} (NDAs)
   Niveau de concurrence    : ${cs.level}
-  Produit(s) de rÃ©fÃ©rence  : ${cs.originators.length > 0 ? cs.originators.map(o => `${o.brand} (${o.sponsor})`).join(', ') : 'N/A'}
-  Fabricants identifiÃ©s    : ${cs.manufacturers.length > 0 ? cs.manufacturers.join(', ') : 'N/A'}
+  Produit(s) de référence  : ${cs.originators.length > 0 ? cs.originators.map(o => `${o.brand} (${o.sponsor})`).join(', ') : 'N/A'}
+  Fabricants identifiés    : ${cs.manufacturers.length > 0 ? cs.manufacturers.join(', ') : 'N/A'}
 
 // ---------------------------------------------------------------------
 // ----------------------------------------------
-MARCHÃ
+MARCHÉ
 ${ms.source === 'IQVIA' ? `  Valeur totale (CHF)      : ${fmt(Math.round(ms.totalMarketValueCHF))}
-  Croissance              : ${ms.marketGrowthPct >= 0 ? '+' : ''}${ms.marketGrowthPct.toFixed(1)}%` : '  Score neutre appliquÃ© (donnÃ©es IQVIA non fournies)'}
+  Croissance              : ${ms.marketGrowthPct >= 0 ? '+' : ''}${ms.marketGrowthPct.toFixed(1)}%` : '  Score neutre appliqué (données IQVIA non fournies)'}
 
 // -----------------------------------------------------------------------------------------------------------
 // --------
-GÃ©nÃ©rÃ© par PharmaScout -- Usage interne uniquement.
+Généré par PharmaScout -- Usage interne uniquement.
 Sources : FDA FAERS - FDA Orange Book - PubMed NCBI${ms.source === 'IQVIA' ? ' - IQVIA' : ''}
 Ne constitue pas un conseil d'investissement.// --------------------------------------------------------------------------------------------------------------------
 `.trim();
@@ -2244,7 +2244,7 @@ async function fetchEMA(substance) {
     hide('ema-loading');
     show('ema-error');
     document.getElementById('ema-error-text').textContent =
-      `DonnÃ©es EMA indisponibles : ${e.message}. Consultez directement ema.europa.eu`;
+      `Données EMA indisponibles : ${e.message}. Consultez directement ema.europa.eu`;
   }
 }
 
@@ -2285,42 +2285,25 @@ function renderEMA(d) {
   if (pracActive) {
     show('ema-prac-alert');
     hide('ema-no-prac');
-
     document.getElementById('ema-prac-alert-title').textContent =
       d.pracDetails || 'Procédure PRAC / signal de sécurité détecté';
-
     const parts = [];
     if (d.pracType)           parts.push(d.pracType);
     if (d.pracStatus)         parts.push('Statut : ' + d.pracStatus);
     if (d.pracRecommendation) parts.push('Recommandation : ' + d.pracRecommendation);
     if (d.pracDecisionDate)   parts.push('Décision CE : ' + d.pracDecisionDate);
     document.getElementById('ema-prac-alert-detail').textContent = parts.join(' - ');
-
     const mainRef = allReferrals[0];
     const metaEl  = document.getElementById('ema-prac-meta');
-    if (mainRef && mainRef.inn) {
-      metaEl.textContent = 'Substances : ' + mainRef.inn;
-    } else {
-      metaEl.textContent = '';
-    }
-
-    if (d.pracUrl) {
-      const linkEl = document.getElementById('ema-prac-link');
-      linkEl.href = d.pracUrl;
-      show('ema-prac-alert-link');
-    } else {
-      hide('ema-prac-alert-link');
-    }
+    if (mainRef && mainRef.inn) { metaEl.textContent = 'Substances : ' + mainRef.inn; } else { metaEl.textContent = ''; }
+    if (d.pracUrl) { const linkEl = document.getElementById('ema-prac-link'); linkEl.href = d.pracUrl; show('ema-prac-alert-link'); } else { hide('ema-prac-alert-link'); }
   } else if (!pracActive && !hasPsusas) {
-    hide('ema-prac-alert');
-    show('ema-no-prac');
+    hide('ema-prac-alert'); show('ema-no-prac');
   } else {
-    // PSUSAs exist but no referrals
-    hide('ema-prac-alert');
-    hide('ema-no-prac');
+    hide('ema-prac-alert'); hide('ema-no-prac');
   }
 
-  // ---- Liste de tous les referrals ----
+  // ---- Referrals ----
   if (allReferrals.length > 0) {
     show('ema-all-referrals-section');
     document.getElementById('ema-all-referrals-list').innerHTML = allReferrals.map(r => `
@@ -2328,10 +2311,7 @@ function renderEMA(d) {
         --
         <div style="flex:1">
           <div class="flag-label" style="font-size:0.85rem">
-            ${r.url
-              ? `<a href="${r.url}" target="_blank" style="color:inherit;text-decoration:underline">${r.name}</a>`
-              : r.name
-}
+            ${r.url ? `<a href="${r.url}" target="_blank" style="color:inherit;text-decoration:underline">${r.name}</a>` : r.name}
           </div>
           <div class="flag-detail" style="font-size:0.78rem">
             ${[r.type, r.status, r.recommendation ? 'Recommandation : ' + r.recommendation : ''].filter(Boolean).join(' - ')}
@@ -2340,11 +2320,9 @@ function renderEMA(d) {
         </div>
       </div>
     `).join('');
-  } else {
-    hide('ema-all-referrals-section');
-  }
+  } else { hide('ema-all-referrals-section'); }
 
-  // ---- PSUSAs (bilans périodiques de sécurité) ----
+  // ---- PSUSAs ----
   if (hasPsusas) {
     show('ema-psusa-section');
     document.getElementById('ema-psusa-list').innerHTML = psusas.slice(0, 15).map(p => `
@@ -2352,9 +2330,7 @@ function renderEMA(d) {
         --
         <div style="flex:1">
           <div class="flag-label" style="font-size:0.85rem">
-            ${p.url
-              ? `<a href="${p.url}" target="_blank" style="color:inherit;text-decoration:underline">${p.procedure || p.substance || 'PSUSA'}</a>`
-              : (p.procedure || p.substance || 'PSUSA')}
+            ${p.url ? `<a href="${p.url}" target="_blank" style="color:inherit;text-decoration:underline">${p.procedure || p.substance || 'PSUSA'}</a>` : (p.procedure || p.substance || 'PSUSA')}
           </div>
           <div class="flag-detail" style="font-size:0.78rem">
             ${[p.outcome, p.updated ? 'Mis à jour : ' + p.updated : '', p.medicines ? 'Médicaments : ' + p.medicines.slice(0,80) : ''].filter(Boolean).join(' - ')}
@@ -2362,9 +2338,7 @@ function renderEMA(d) {
         </div>
       </div>
     `).join('');
-  } else {
-    hide('ema-psusa-section');
-  }
+  } else { hide('ema-psusa-section'); }
 
   // ---- DHPCs ----
   if (dhpcs.length > 0) {
@@ -2374,9 +2348,7 @@ function renderEMA(d) {
         --
         <div style="flex:1">
           <div class="flag-label" style="font-size:0.85rem">
-            ${dc.url
-              ? `<a href="${dc.url}" target="_blank" style="color:inherit;text-decoration:underline">${dc.name || 'DHPC'}</a>`
-              : (dc.name || 'DHPC')}
+            ${dc.url ? `<a href="${dc.url}" target="_blank" style="color:inherit;text-decoration:underline">${dc.name || 'DHPC'}</a>` : (dc.name || 'DHPC')}
           </div>
           <div class="flag-detail" style="font-size:0.78rem">
             ${[dc.date, dc.outcome, dc.type].filter(Boolean).join(' - ')}
@@ -2384,15 +2356,10 @@ function renderEMA(d) {
         </div>
       </div>
     `).join('');
-  } else {
-    hide('ema-dhpc-section');
-  }
+  } else { hide('ema-dhpc-section'); }
 
-  // ---- Lien de recherche EMA ----
-  document.getElementById('ema-search-link').href =
-    d.searchUrl || `https://www.ema.europa.eu/en/search?search_api_fulltext=${encodeURIComponent(d.substance)}`;
+  document.getElementById('ema-search-link').href = d.searchUrl || `https://www.ema.europa.eu/en/search?search_api_fulltext=${encodeURIComponent(d.substance)}`;
 
-  // ---- Produits EMA ----
   if (d.products && d.products.length > 0) {
     show('ema-products-section');
     document.getElementById('ema-products-body').innerHTML = d.products.map(p =>
@@ -2403,24 +2370,18 @@ function renderEMA(d) {
 }
 
 /**
- * Ajoute les signaux EMA dans le flags-container de l'onglet SÃ©curitÃ© * pour que l'overview ne soit pas uniquement
- basÃ© sur les donnÃ©es FDA.
+ * Ajoute les signaux EMA dans le flags-container de l'onglet Sécurité * pour que l'overview ne soit pas uniquement
+ basé sur les données FDA.
  */
 function injectEmaFlagsIntoSafety(d) {
   const container = document.getElementById('flags-container');
   if (!container) return;
-
-  // Supprimer les anciens flags EMA s'il y en a
   container.querySelectorAll('.ema-flag-injected').forEach(el => el.remove());
-
   const fragments = [];
 
-  // Signal PRAC de sécurité
   if (d.pracActive && d.isSafetyReferral) {
-    const ref = (d.allReferrals || [])[0] || {};
     const urlPart = d.pracUrl
-      ? `<a href="${d.pracUrl}" target="_blank" style="color:#ef4444;margin-left:6px;font-size:0.78rem;font-weight:600">-- ema.europa.eu --</a>`
-      : '';
+      ? `<a href="${d.pracUrl}" target="_blank" style="color:#ef4444;margin-left:6px;font-size:0.78rem;font-weight:600">-- ema.europa.eu --</a>` : '';
     fragments.push(`
       <div class="flag-item flag-danger ema-flag-injected">
         ----- <div>
@@ -2431,8 +2392,7 @@ function injectEmaFlagsIntoSafety(d) {
             ${urlPart}
           </div>
         </div>
-      </div>
-    `);
+      </div>`);
   } else if (d.pracActive) {
     fragments.push(`
       <div class="flag-item flag-warning ema-flag-injected">
@@ -2442,11 +2402,9 @@ function injectEmaFlagsIntoSafety(d) {
             ${d.pracUrl ? `<a href="${d.pracUrl}" target="_blank" style="color:var(--accent);margin-left:6px;font-size:0.78rem">-- ema.europa.eu --</a>` : ''}
           </div>
         </div>
-      </div>
-    `);
+      </div>`);
   }
 
-  // PSUSAs
   const psusas = d.psusas || [];
   if (psusas.length > 0 && !d.pracActive) {
     const ps = psusas[0];
@@ -2458,11 +2416,9 @@ function injectEmaFlagsIntoSafety(d) {
             ${ps.url ? `<a href="${ps.url}" target="_blank" style="color:var(--accent);margin-left:6px;font-size:0.78rem">-- Voir --</a>` : ''}
           </div>
         </div>
-      </div>
-    `);
+      </div>`);
   }
 
-  // DHPCs
   if (d.hasDhpc && d.dhpcs && d.dhpcs.length > 0) {
     const dhpc = d.dhpcs[0];
     fragments.push(`
@@ -2473,13 +2429,10 @@ function injectEmaFlagsIntoSafety(d) {
             ${dhpc.url ? `<a href="${dhpc.url}" target="_blank" style="color:var(--accent);margin-left:6px;font-size:0.78rem">-- Voir --</a>` : ''}
           </div>
         </div>
-      </div>
-    `);
+      </div>`);
   }
 
-  if (fragments.length > 0) {
-    container.insertAdjacentHTML('afterbegin', fragments.join(''));
-  }
+  if (fragments.length > 0) { container.insertAdjacentHTML('afterbegin', fragments.join('')); }
 
   const _rEs=document.getElementById('reg-ema-status');
   const _rEd=document.getElementById('reg-ema-detail');
@@ -2514,15 +2467,15 @@ function injectSwissFlagsIntoSafety(d) {
   const _mSP=document.getElementById('m-swiss-pv-safety');
   if (_rSs) {
     if (d.pvAlert) {
-      if(_rSs){_rSs.textContent='ð¡ Vigilance News';_rSs.style.color='#f59e0b';}
-      if(_rSd){_rSd.textContent='MentionnÃ© dans Vigilance News';}
-      if(_mSP){_mSP.textContent='ð¡ Oui';_mSP.style.color='#f59e0b';}
+      if(_rSs){_rSs.textContent='🟡 Vigilance News';_rSs.style.color='#f59e0b';}
+      if(_rSd){_rSd.textContent='Mentionné dans Vigilance News';}
+      if(_mSP){_mSP.textContent='🟡 Oui';_mSP.style.color='#f59e0b';}
     } else if (d.totalCHProducts > 0) {
-      if(_rSs){_rSs.textContent='ð¢ AutorisÃ© CH';_rSs.style.color='#10b981';}
+      if(_rSs){_rSs.textContent='🟢 Autorisé CH';_rSs.style.color='#10b981';}
       if(_rSd){_rSd.textContent=d.totalCHProducts+' produit(s) Swissmedic';}
-      if(_mSP){_mSP.textContent='ð¢ AutorisÃ©';_mSP.style.color='#10b981';}
+      if(_mSP){_mSP.textContent='🟢 Autorisé';_mSP.style.color='#10b981';}
     } else {
-      if(_rSs){_rSs.textContent='âª Absent du marchÃ© CH';}_rSs.style.color='var(--text-muted)';
+      if(_rSs){_rSs.textContent='⚪ Absent du marché CH';}_rSs.style.color='var(--text-muted)';
       if(_rSd){_rSd.textContent='';}
       if(_mSP){_mSP.textContent='--';_mSP.style.color='var(--text-muted)';}
     }
@@ -2531,7 +2484,7 @@ function injectSwissFlagsIntoSafety(d) {
   if (!_fc) return;
   _fc.querySelectorAll('.swiss-flag-injected').forEach(el=>el.remove());
   if (d.pvAlert) {
-    _fc.insertAdjacentHTML('afterbegin',`<div class="flag-item flag-warning swiss-flag-injected">----- <div><div class="flag-label">Swissmedic Vigilance News : ${d.pvDetails?'<a href="'+d.pvDetails+'" target="_blank" style="color:inherit;text-decoration:underline">Voir la notice</a>':'Signal dÃ©tectÃ©'}</div><div class="flag-detail">Communication de pharmacovigilance Swissmedic</div></div></div>`);  }
+    _fc.insertAdjacentHTML('afterbegin',`<div class="flag-item flag-warning swiss-flag-injected">----- <div><div class="flag-label">Swissmedic Vigilance News : ${d.pvDetails?'<a href="'+d.pvDetails+'" target="_blank" style="color:inherit;text-decoration:underline">Voir la notice</a>':'Signal détecté'}</div><div class="flag-detail">Communication de pharmacovigilance Swissmedic</div></div></div>`);  }
 }
 
 function renderSwissmedic(d) {
@@ -2546,17 +2499,17 @@ function renderSwissmedic(d) {
 
   // ---- KPIs ----
   document.getElementById('m-swiss-total').textContent = totalAll || '--';
-  // Sous-libellÃ© : dÃ©tail mono/combi
+  // Sous-libellé : détail mono/combi
   const subEl = document.getElementById('m-swiss-total-sub');
   if (meta.totalMono > 0 && meta.totalCombi > 0) {
-    subEl.textContent = `${meta.totalMono} mono Â· ${meta.totalCombi} combi`;
+    subEl.textContent = `${meta.totalMono} mono · ${meta.totalCombi} combi`;
   } else {
-    subEl.textContent = 'MarchÃ© suisse';
+    subEl.textContent = 'Marché suisse';
   }
 
   // Pharmacovigilance
   if (d.pvAlert) {
-    document.getElementById('m-swiss-pv').textContent = 'ð¡ Oui';
+    document.getElementById('m-swiss-pv').textContent = '🟡 Oui';
     document.getElementById('m-swiss-pv').style.color = '#f59e0b';
     show('swiss-pv-alert');
     if (d.pvDetails) {
@@ -2564,7 +2517,7 @@ function renderSwissmedic(d) {
         `Mention dans les <a href="${d.pvDetails}" target="_blank" style="color:var(--accent)">Vigilance News Swissmedic</a>.`;
     }
   } else {
-    document.getElementById('m-swiss-pv').textContent = 'ð¢ Aucune';
+    document.getElementById('m-swiss-pv').textContent = '🟢 Aucune';
     document.getElementById('m-swiss-pv').style.color = '#10b981';
     hide('swiss-pv-alert');
   }
@@ -2573,25 +2526,25 @@ function renderSwissmedic(d) {
   const holdersEl = document.getElementById('m-swiss-holders');
   if (holdersEl) holdersEl.textContent = meta.holders || '-';
 
-  // ---- Produit de rÃ©fÃ©rence plausible ----
+  // ---- Produit de référence plausible ----
   if (ref.label) {
     show('swiss-reference-section');
     const box = document.getElementById('swiss-reference-box');
     if (ref.found && ref.product) {
       const year = ref.product.firstAuth ? ref.product.firstAuth.substring(0, 4) : '?';
-      const confLabel = ref.confidence === 'date' ? '(par anciennetÃ©)' : '';
+      const confLabel = ref.confidence === 'date' ? '(par ancienneté)' : '';
       box.style.background = '#eff6ff';
       box.style.border = '1px solid #bfdbfe';
       box.innerHTML = `<i class="bi bi-award" style="color:#3b82f6;font-size:1rem"></i>
         <span style="color:#1e40af;font-weight:600">${ref.label}</span>
-        <span style="color:#1e3a5f">${ref.product.name} â ${ref.product.holder}</span>
+        <span style="color:#1e3a5f">${ref.product.name} — ${ref.product.holder}</span>
         <span style="color:#64748b;font-size:0.75rem">(CH depuis ${year}) ${confLabel}</span>`;
     } else {
       box.style.background = '#f9fafb';
       box.style.border = '1px solid #e5e7eb';
       box.innerHTML = `<i class="bi bi-question-circle" style="color:#9ca3af;font-size:1rem"></i>
         <span style="color:#6b7280;font-weight:500">${ref.label}</span>
-        <span style="color:#9ca3af;font-size:0.75rem">â donnÃ©es insuffisantes pour identifier un produit de rÃ©fÃ©rence</span>`;
+        <span style="color:#9ca3af;font-size:0.75rem">— données insuffisantes pour identifier un produit de référence</span>`;
     }
   } else {
     hide('swiss-reference-section');
@@ -2603,7 +2556,7 @@ function renderSwissmedic(d) {
     document.getElementById('swiss-products-body').innerHTML = mono.slice(0, 15).map((p, i) => {
       const year = p.firstAuth ? p.firstAuth.substring(0, 4) : '--';
       const isRef = ref.found && ref.product && ref.product.authNum === p.authNum;
-      const refDot = isRef ? '<span style="color:#3b82f6;margin-right:4px" title="Produit de rÃ©fÃ©rence plausible">&#9670;</span>' : '';
+      const refDot = isRef ? '<span style="color:#3b82f6;margin-right:4px" title="Produit de référence plausible">&#9670;</span>' : '';
       return `<tr>
         <td>${refDot}${p.name || '--'}</td>
         <td style="color:var(--text-muted)">${p.holder || '--'}</td>
