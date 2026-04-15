@@ -353,12 +353,26 @@ async function checkPharmacovigilance(substance) {
   try {
     const pvUrl = 'https://www.swissmedic.ch/swissmedic/en/home/humanarzneimittel/market-surveillance/pharmacovigilance/vigilance-news.html';
     const pvHtml = await fetchText(pvUrl);
-    const subLower = substance.toLowerCase();
-    const searchTerm = subLower.substring(0, Math.min(8, subLower.length));
-    if (pvHtml.toLowerCase().includes(searchTerm)) {
+    const htmlLower = pvHtml.toLowerCase();
+
+    // Utiliser les mêmes racines que pour l'Excel (cohérence de matching)
+    const stems = buildSearchStems(substance);
+
+    // Chercher la meilleure correspondance : du stem le plus long au plus court
+    let matchedStem = null;
+    for (const stem of stems) {
+      if (stem.length >= 5 && htmlLower.includes(stem)) {
+        matchedStem = stem;
+        break; // stems triés par longueur décroissante → premier match = plus spécifique
+      }
+    }
+
+    if (matchedStem) {
       pvAlert = true;
+      // Chercher un lien associé au terme trouvé
+      const escaped = matchedStem.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const linkPattern = new RegExp(
-        `<a[^>]+href="([^"]+)"[^>]*>[^<]*${searchTerm}[^<]*<\\/a>`, 'i'
+        `<a[^>]+href="([^"]+)"[^>]*>[^<]*${escaped}[^<]*<\\/a>`, 'i'
       );
       const linkMatch = pvHtml.match(linkPattern);
       if (linkMatch) {
