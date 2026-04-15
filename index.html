@@ -1042,6 +1042,12 @@
             </div>
           </div>
 
+          <!-- Originator / Reference product -->
+          <div id="originator-section" style="display:none">
+            <div class="section-heading"><i class="bi bi-award"></i>Produit(s) de référence (NDA)</div>
+            <div id="originator-list"></div>
+          </div>
+
           <!-- FDA manufacturers -->
           <div id="manufacturers-section" style="display:none">
             <div class="section-heading"><i class="bi bi-buildings"></i>Fabricants identifiés (FDA Orange Book)</div>
@@ -1220,6 +1226,8 @@ function resetResults() {
   if (_swHolders) _swHolders.textContent = '-';
 
   // Reset competition
+  document.getElementById('originator-section').style.display = 'none';
+  document.getElementById('originator-list').innerHTML = '';
   document.getElementById('manufacturers-section').style.display = 'none';
   document.getElementById('manufacturers-list').innerHTML = '';
 
@@ -1614,8 +1622,8 @@ async function fetchFAERS(substance) {
 }
 
 async function fetchGenerics(substance) {
-  const result = { 
-totalApprovals: 0, genericApprovals: 0, ndaApprovals: 0, manufacturers: [] };
+  const result = {
+totalApprovals: 0, genericApprovals: 0, ndaApprovals: 0, manufacturers: [], originators: [] };
   try {
     const r = await fetch(`https://api.fda.gov/drug/drugsfda.json?search=${encodeURIComponent(`openfda.generic_name:"${substance}"`)}&limit=100`);
     if (r.ok) {
@@ -1623,13 +1631,26 @@ totalApprovals: 0, genericApprovals: 0, ndaApprovals: 0, manufacturers: [] };
       result.totalApprovals = d.meta?.results?.total || 0;
       const apps = d.results || [];
       const andas = apps.filter(a => (a.application_number || '').startsWith('ANDA'));
-      const ndas  = apps.filter(a => 
+      const ndas  = apps.filter(a =>
 (a.application_number || '').startsWith('NDA'));
       result.genericApprovals = andas.length;
       result.ndaApprovals = ndas.length;
       const mfrs = new Set();
       andas.forEach(a => { if (a.sponsor_name) mfrs.add(a.sponsor_name.trim()); });
       result.manufacturers = [...mfrs].sort().slice(0, 15);
+      // Extract originator details from NDAs
+      const seen = new Set();
+      ndas.forEach(a => {
+        const brand = (a.openfda?.brand_name || [])[0] || '';
+        const sponsor = (a.sponsor_name || '').trim();
+        const appNum = a.application_number || '';
+        const key = brand.toUpperCase() + '|' + sponsor.toUpperCase();
+        if (brand && !seen.has(key)) {
+          seen.add(key);
+          result.originators.push({ brand, sponsor, appNum });
+        }
+      });
+      result.originators = result.originators.slice(0, 3);
     }
   } catch(e) { console.warn('Generics error:', e); }
   return result;
@@ -1806,7 +1827,7 @@ function calcCompetition(gen) {
   else if (n <= 10)  { score=4.5; level='Marché compétitif'; emoji='🟠'; }
   else if (n <= 20)  { score=2.5; level='Marché très compétitif'; emoji='🔴'; }
   else               { score=1.0; level='Marché saturé – nombreux génériques'; emoji='🔴'; }
-  return { score, n, nda: gen.ndaApprovals, level, emoji, manufacturers: gen.manufacturers };
+  return { score, n, nda: gen.ndaApprovals, level, emoji, manufacturers: gen.manufacturers, originators: gen.originators || [] };
 }
 
 function calcMarket(iqvia) {
@@ -1971,6 +1992,15 @@ function renderResults() {
   document.getElementById('m-generics').textContent = cs.n;
   document.getElementById('m-nda').textContent = cs.nda;
   document.getElementById('m-comp-level').textContent = cs.emoji + ' ' + cs.level;
+  // Originator / reference products
+  if (cs.originators && cs.originators.length > 0) {
+    document.getElementById('originator-section').style.display = 'block';
+    document.getElementById('originator-list').innerHTML = cs.originators.map(o =>
+      `<span class="mfr-chip" style="background:#f0f4ff;border-color:#bfcfff;color:#1e40af"><i class="bi bi-award" style="margin-right:4px;font-size:0.75rem"></i>${o.brand} <span style="color:#64748b;font-weight:400;margin-left:4px">— ${o.sponsor}</span></span>`
+    ).join('');
+  } else {
+    document.getElementById('originator-section').style.display = 'none';
+  }
   if (cs.manufacturers && cs.manufacturers.length > 0) {
     document.getElementById('manufacturers-section').style.display = 'block';
     document.getElementById('manufacturers-list').innerHTML = cs.manufacturers.map(m => `<span class="mfr-chip">${m}</span>`).join('');
@@ -2137,6 +2167,7 @@ CONCURRENCE (FDA Orange Book)
   Génériques approuvés     : ${cs.n} (ANDAs)
   Produits originaux       : ${cs.nda} (NDAs)
   Niveau de concurrence    : ${cs.level}
+  Produit(s) de référence  : ${cs.originators.length > 0 ? cs.originators.map(o => `${o.brand} (${o.sponsor})`).join(', ') : 'N/A'}
   Fabricants identifiés    : ${cs.manufacturers.length > 0 ? cs.manufacturers.join(', ') : 'N/A'}
 
 // ---------------------------------------------------------------------
