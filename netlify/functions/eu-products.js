@@ -1,9 +1,10 @@
 /**
- * PharmaScout — Netlify Function : EU Products v8
+ * PharmaScout — Netlify Function : EU Products v9
  *
- * FR → BDPM via data.gouv.fr CDN (CSV CIS_COMPO + CIS_bdpm)
- *       Cache module-level 24h — aucune dépendance BDPM serveur (SPA JS inaccessible depuis Lambda)
- *       Stratégie : data.gouv.fr API → URLs CDN dynamiques → téléchargement CSV → parsing → Map en mémoire
+ * FR → BDPM REST API interne (/api/produit/by-substance-active)
+ *       Découverte par reverse-engineering du bundle JS de la SPA BDPM (avril 2026)
+ *       Paramètres requis : contains, query[], tag=substance, draw, columns[0][data], start, length
+ *       Pas de CSV, pas de cache global — simple GET JSON par requête
  * ES → CIMA REST API v1.23 (AEMPS) — substance active (practiv1), multi-case
  * PT → Graceful empty — INFARMED INFOMED sans API JSON publique ouverte
  * BE → Graceful empty — SAM/FAMHP sans API JSON publique ouverte
@@ -26,22 +27,16 @@ const COUNTRY_LINKS = {
   be: 'https://www.famhp.be/en/human_use/medicines/medicines/information_about_medicines/authorised_medicines_in_belgium'
 };
 
-// ─── Cache BDPM module-level (survit entre appels Lambda warm) ────────────────
-// compoMap : substance_norm (lowercase, trim) → Set<CIS_code_string>
-// cisMap   : CIS_code_string → { name, holder, status }
-let _bdpmCache = null;   // { compoMap: Map, cisMap: Map, ts: number } | null
-const BDPM_CACHE_TTL = 24 * 60 * 60 * 1000; // 24h
-
-// data.gouv.fr dataset ID (slug officiel)
-const DATAGOUV_DATASET_API =
-  'https://www.data.gouv.fr/api/1/datasets/base-de-donnees-publique-des-medicaments-base-officielle/';
+// ─── Cache session BDPM (cookie PHP de session, 25 min) ──────────────────────
+let _bdpmCookie = null;   // { value: string, ts: number } | null
+const BDPM_COOKIE_TTL = 25 * 60 * 1000; // 25min
 
 // ─── Espagne — cache par substance (30min) ────────────────────────────────────
 const _esCache = new Map();
 const ES_CACHE_TTL = 30 * 60 * 1000;
 
 // ─── Helper : GET HTTP/HTTPS, suit les redirections, retour Buffer ────────────
-function httpGet(url, timeoutMs) {
+function httpGet(url, timeoutMs, extraHeaders) {
   return new Promise((resolve, reject) => {
     let parsed;
     try { parsed = new URL(url); } catch(e) { return reject(new Error('URL invalide: ' + url)); }
@@ -51,11 +46,12 @@ function httpGet(url, timeoutMs) {
       path:     parsed.pathname + parsed.search,
       method:   'GET',
       timeout:  timeoutMs,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; PharmaScoutBot/1.0)',
-        'Accept':     '*/*',
-        'Accept-Encoding': 'gzip, deflate'
-      }
+      headers: Object.assign({
+        'User-Agent':      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept':          'application/json, */*',
+        'Accept-Encoding': 'gzip, deflate',
+        'Accept-Language': 'fr-FR,fr;q=0.9'
+      }, extraHeaders || {})
     };
 
     const req = https.request(options, (res) => {
@@ -65,7 +61,7 @@ function httpGet(url, timeoutMs) {
         const loc = res.headers.location;
         if (!loc) return reject(new Error('Redirection sans Location'));
         const abs = loc.startsWith('http') ? loc : parsed.protocol + '//' + parsed.host + loc;
-        return httpGet(abs, timeoutMs).then(resolve).catch(reject);
+        return httpGet(abs, timeoutMs, extraHeaders).then(resolve).catch(reject);
       }
       if (res.statusCode < 200 || res.statusCode >= 300) {
         res.resume();
@@ -89,202 +85,112 @@ function httpGet(url, timeoutMs) {
   });
 }
 
+// ─── Helper : GET HTTP/HTTPS + retourner headers de réponse ──────────────────
+function httpGetWithHeaders(url, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    let parsed;
+    try { parsed = new URL(url); } catch(e) { return reject(new Error('URL invalide: ' + url)); }
+
+    const options = {
+      hostname: parsed.hostname,
+      path:     parsed.pathname + parsed.search,
+      method:   'GET',
+      timeout:  timeoutMs,
+      headers: {
+        'User-Agent':      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept':          'text/html,application/xhtml+xml,*/*',
+        'Accept-Encoding': 'gzip, deflate',
+        'Accept-Language': 'fr-FR,fr;q=0.9'
+      }
+    };
+
+    const req = https.request(options, (res) => {
+      res.resume(); // on ne lit pas le body, juste les headers
+      resolve({ statusCode: res.statusCode, headers: res.headers });
+    });
+
+    req.on('timeout', () => { req.destroy(); reject(new Error('timeout session BDPM')); });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
 // ─── Helper : GET JSON ────────────────────────────────────────────────────────
-async function httpGetJson(url, timeoutMs) {
-  const buf = await httpGet(url, timeoutMs);
+async function httpGetJson(url, timeoutMs, extraHeaders) {
+  const buf = await httpGet(url, timeoutMs, extraHeaders);
   return JSON.parse(buf.toString('utf8'));
 }
 
-// URLs directes de téléchargement BDPM (serveur gouvernemental)
-// Candidates dans l'ordre de préférence — la première qui répond HTTP 200 est utilisée
-const BDPM_CIS_CANDIDATES = [
-  'https://base-donnees-publique.medicaments.gouv.fr/telechargement.php?fichier=CIS_bdpm.txt',
-  'http://base-donnees-publique.medicaments.gouv.fr/telechargement.php?fichier=CIS_bdpm.txt'
-];
-const BDPM_COMPO_CANDIDATES = [
-  'https://base-donnees-publique.medicaments.gouv.fr/telechargement.php?fichier=CIS_COMPO_bdpm.txt',
-  'http://base-donnees-publique.medicaments.gouv.fr/telechargement.php?fichier=CIS_COMPO_bdpm.txt'
-];
-
-// Télécharger depuis la première URL candidate qui fonctionne
-async function downloadFirstWorking(candidates, label, timeoutMs) {
-  let lastErr = null;
-  for (const url of candidates) {
-    try {
-      console.log('[BDPM] Tentative ' + label + ': ' + url.slice(0, 80));
-      const buf = await httpGet(url, timeoutMs);
-      if (buf.length < 1000) throw new Error('Réponse trop courte (' + buf.length + ' octets) — probablement pas le CSV');
-      console.log('[BDPM] OK ' + label + ': ' + buf.length + ' octets');
-      return buf;
-    } catch(e) {
-      console.warn('[BDPM] Échec ' + label + ' [' + url.slice(-40) + ']: ' + e.message);
-      lastErr = e;
-    }
+// ─── Obtenir (ou renouveler) le cookie de session BDPM ───────────────────────
+async function getBdpmSessionCookie() {
+  if (_bdpmCookie && (Date.now() - _bdpmCookie.ts) < BDPM_COOKIE_TTL) {
+    return _bdpmCookie.value;
   }
-  throw new Error(label + ' inaccessible: ' + (lastErr ? lastErr.message : 'inconnu'));
+  try {
+    const { headers } = await httpGetWithHeaders('https://base-donnees-publique.medicaments.gouv.fr/', 8000);
+    const setCookie = headers['set-cookie'];
+    if (setCookie) {
+      // Extraire seulement nom=valeur (sans les attributs Path, HttpOnly, etc.)
+      const cookieStr = Array.isArray(setCookie)
+        ? setCookie.map(c => c.split(';')[0]).join('; ')
+        : setCookie.split(';')[0];
+      _bdpmCookie = { value: cookieStr, ts: Date.now() };
+      console.log('[BDPM] Cookie session obtenu: ' + cookieStr.slice(0, 40));
+      return cookieStr;
+    }
+  } catch(e) {
+    console.warn('[BDPM] Impossible d\'obtenir le cookie de session: ' + e.message);
+  }
+  return null;
 }
 
-// ─── Charger (ou renvoyer depuis cache) les deux Maps BDPM ───────────────────
-async function loadBdpmMaps() {
-  // Cache encore valide ?
-  if (_bdpmCache && (Date.now() - _bdpmCache.ts) < BDPM_CACHE_TTL) {
-    console.log('[BDPM] Cache chaud — ' + _bdpmCache.compoMap.size + ' substances, ' + _bdpmCache.cisMap.size + ' produits');
-    return _bdpmCache;
-  }
-
-  console.log('[BDPM] Chargement des CSV BDPM (téléchargement direct)...');
-
-  // Télécharger CIS_bdpm.txt et CIS_COMPO_bdpm.txt en parallèle
-  const [cisBuf, compoBuf] = await Promise.all([
-    downloadFirstWorking(BDPM_CIS_CANDIDATES,   'CIS_bdpm',  22000),
-    downloadFirstWorking(BDPM_COMPO_CANDIDATES, 'CIS_COMPO', 22000)
-  ]);
-
-  console.log('[BDPM] Tailles brutes: CIS=' + cisBuf.length + ', COMPO=' + compoBuf.length);
-
-  // 3. Décoder (UTF-8 avec éventuel BOM)
-  const decode = (buf) => {
-    let s = buf.toString('utf8');
-    // Retirer BOM UTF-8 (EF BB BF)
-    if (s.charCodeAt(0) === 0xFEFF) s = s.slice(1);
-    // Parfois encodé Latin-1 → réessayer
-    if (s.includes('\uFFFD') && s.length < buf.length * 1.1) {
-      s = buf.toString('latin1');
-    }
-    return s;
-  };
-
-  const cisText   = decode(cisBuf);
-  const compoText = decode(compoBuf);
-
-  // 4. Parser CIS_bdpm.txt
-  //    Colonnes (tab-separated, pas d'en-tête) :
-  //    0=CIS  1=denomination  2=forme  3=voie  4=statut_AMM  5=type_procedure
-  //    6=etat_commercialisation  7=date_AMM  8=statut_BdM  9=num_aut_europ
-  //    10=titulaires  11=surveillance_renforcee
-  const cisMap = new Map();
-  for (const line of cisText.split('\n')) {
-    if (!line.trim()) continue;
-    const cols = line.split('\t');
-    if (cols.length < 5) continue;
-    const cis    = cols[0].trim();
-    const name   = (cols[1] || '').trim();
-    const status = (cols[4] || '').trim();   // statut AMM
-    const etat   = (cols[6] || '').trim();   // état commercialisation
-    const holder = (cols[10] || '').trim();
-    if (!cis || !name) continue;
-    cisMap.set(cis, { name, holder, status, etat });
-  }
-  console.log('[BDPM] CIS map: ' + cisMap.size + ' produits');
-
-  // 5. Parser CIS_COMPO_bdpm.txt
-  //    Colonnes (tab-separated, pas d'en-tête) :
-  //    0=CIS  1=designation_element  2=code_substance  3=denomination_substance(INN)
-  //    4=dosage  5=ref_dosage  6=nature_composant  7=num_liaison
-  const compoMap = new Map(); // substance_norm → Set<CIS_code>
-  for (const line of compoText.split('\n')) {
-    if (!line.trim()) continue;
-    const cols = line.split('\t');
-    if (cols.length < 4) continue;
-    const cis      = cols[0].trim();
-    const substRaw = (cols[3] || '').trim();
-    if (!cis || !substRaw) continue;
-    const substNorm = substRaw.toLowerCase();
-    if (!compoMap.has(substNorm)) compoMap.set(substNorm, new Set());
-    compoMap.get(substNorm).add(cis);
-  }
-  console.log('[BDPM] COMPO map: ' + compoMap.size + ' substances');
-
-  _bdpmCache = { compoMap, cisMap, ts: Date.now() };
-  return _bdpmCache;
-}
-
-// ─── France — BDPM CSV (via data.gouv.fr CDN) ────────────────────────────────
+// ─── France — BDPM REST API interne ──────────────────────────────────────────
+// Endpoint découvert par reverse-engineering du bundle JS de la SPA BDPM (avril 2026)
+// URL : /api/produit/by-substance-active?contains=X&query[]=X&tag=substance&...
+// Réponse JSON : { data: [{SpecDenom01, SpecId, StatutBdm, SpecGeneDenom, ...}], recordsTotal, ... }
 async function fetchFrance(substance) {
-  const maps = await loadBdpmMaps();
-  const { compoMap, cisMap } = maps;
+  // 1. Obtenir le cookie de session BDPM (l'API semble le requérir)
+  const cookie = await getBdpmSessionCookie();
 
-  // Chercher la substance (exact + préfixe + contient) en ordre décroissant de précision
-  const substLow = substance.toLowerCase().trim();
+  // 2. Construire l'URL avec les paramètres exacts requis par le DataTable BDPM
+  const sub = encodeURIComponent(substance);
+  const url = 'https://base-donnees-publique.medicaments.gouv.fr/api/produit/by-substance-active'
+    + '?contains=' + sub
+    + '&query%5B%5D=' + sub
+    + '&tag=substance'
+    + '&draw=1&page=1&limit=100&start=0&length=100'
+    + '&columns%5B0%5D%5Bdata%5D=SpecDenom01'
+    + '&columns%5B0%5D%5Bname%5D='
+    + '&columns%5B0%5D%5Bsearchable%5D=true'
+    + '&columns%5B0%5D%5Borderable%5D=false'
+    + '&columns%5B0%5D%5Bsearch%5D%5Bvalue%5D='
+    + '&columns%5B0%5D%5Bsearch%5D%5Bregex%5D=false'
+    + '&search%5Bvalue%5D=&search%5Bregex%5D=false';
 
-  let cisCodes = new Set();
+  const extraHeaders = {
+    'Referer': 'https://base-donnees-publique.medicaments.gouv.fr/',
+    'Origin':  'https://base-donnees-publique.medicaments.gouv.fr'
+  };
+  if (cookie) extraHeaders['Cookie'] = cookie;
 
-  // 1. Match exact
-  if (compoMap.has(substLow)) {
-    compoMap.get(substLow).forEach(c => cisCodes.add(c));
-  }
+  console.log('[BDPM] GET API substance: ' + substance);
+  const data = await httpGetJson(url, 12000, extraHeaders);
 
-  // 2. Si 0 résultat exact : chercher les substances qui contiennent le terme
-  if (cisCodes.size === 0) {
-    for (const [key, codes] of compoMap) {
-      // la substance BDPM contient le terme recherché (ex: "prilocaïne" dans "prilocaïne + lidocaïne")
-      // OU le terme recherché contient la substance BDPM (ex: "prilocaïne" dans "prilocaïne chlorhydrate")
-      if (key.includes(substLow) || substLow.includes(key)) {
-        codes.forEach(c => cisCodes.add(c));
-      }
-    }
-  }
-
-  // 3. Recherche par préfixe (3 premiers mots du terme recherché, au minimum 5 chars)
-  if (cisCodes.size === 0 && substLow.length >= 5) {
-    const prefix = substLow.slice(0, Math.min(substLow.length, 8));
-    for (const [key, codes] of compoMap) {
-      if (key.startsWith(prefix)) {
-        codes.forEach(c => cisCodes.add(c));
-      }
-    }
-  }
-
-  if (cisCodes.size === 0) {
-    console.log('[BDPM] 0 CIS trouvés pour substance: ' + substance);
+  if (!data.data || !Array.isArray(data.data)) {
+    console.log('[BDPM] Réponse inattendue: ' + JSON.stringify(data).slice(0, 100));
     return [];
   }
 
-  console.log('[BDPM] ' + cisCodes.size + ' CIS trouvés pour: ' + substance);
+  console.log('[BDPM] ' + data.recordsTotal + ' produits pour: ' + substance);
 
-  // Construire liste de produits depuis cisMap
-  const products = [];
-  const seenNames = new Set();
-
-  for (const cis of cisCodes) {
-    const prod = cisMap.get(cis);
-    if (!prod) continue;
-
-    // Filtrer : garder uniquement les AMM actives
-    // Statuts AMM actifs connus :
-    //   "Autorisation active", "AMO active", "AMO"
-    // Statuts à exclure : "Retrait de l'AMM", "Retrait de l'autorisation par l'entreprise", etc.
-    const statusLow = prod.status.toLowerCase();
-    const isActive = !statusLow.includes('retrait') && !statusLow.includes('suspendu') &&
-                     !statusLow.includes('abrogé') && !statusLow.includes('archivé');
-
-    // Garder aussi les produits avec état de commercialisation = "Commercialisé" ou "Déclaration d'arrêt de commercialisation"
-    // On ne filtre PAS sur l'état de commercialisation car certains "non commercialisés" peuvent être intéressants
-    // mais on exclut les AMM retirées
-    if (!isActive) continue;
-
-    const nameKey = prod.name.toUpperCase().slice(0, 60);
-    if (seenNames.has(nameKey)) continue;
-    seenNames.add(nameKey);
-
-    products.push({
-      name:   prod.name,
-      holder: prod.holder || '',
-      status: prod.etat || prod.status || 'Autorisé'
-    });
-  }
-
-  // Trier : produits commercialisés en premier
-  products.sort((a, b) => {
-    const aComm = a.status.toLowerCase().includes('commerciali');
-    const bComm = b.status.toLowerCase().includes('commerciali');
-    if (aComm && !bComm) return -1;
-    if (!aComm && bComm) return 1;
-    return a.name.localeCompare(b.name, 'fr');
-  });
-
-  console.log('[BDPM] ' + products.length + ' produits uniques pour: ' + substance);
-  return products.slice(0, 50);
+  // StatutBdm : 1 = Commercialisé, 0 = Non commercialisé / retiré
+  return data.data
+    .filter(item => item.SpecDenom01)
+    .map(item => ({
+      name:   item.SpecDenom01,
+      holder: '',
+      status: item.StatutBdm === 1 ? 'Commercialisé' : 'Non commercialisé'
+    }));
 }
 
 // ─── Espagne — CIMA REST API v1.23 ───────────────────────────────────────────
