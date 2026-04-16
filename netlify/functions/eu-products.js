@@ -1,17 +1,28 @@
 /**
- * PharmaScout — Netlify Function : EU Products v9
+ * PharmaScout — Netlify Function : EU Products v11
  *
  * FR → BDPM REST API interne (/api/produit/by-substance-active)
  *       Découverte par reverse-engineering du bundle JS de la SPA BDPM (avril 2026)
  *       Paramètres requis : contains, query[], tag=substance, draw, columns[0][data], start, length
  *       Pas de CSV, pas de cache global — simple GET JSON par requête
  * ES → CIMA REST API v1.23 (AEMPS) — substance active (practiv1), multi-case
- * PT → Graceful empty — INFARMED INFOMED sans API JSON publique ouverte
- * BE → Graceful empty — SAM/FAMHP sans API JSON publique ouverte
+ * PT → INFARMED INFOMED — scraping JSF/PrimeFaces (pesquisa-avancada.xhtml)
+ *       GET page → extrait JSESSIONID + ViewState
+ *       POST AJAX PrimeFaces avec mainForm:dci_input=substance
+ *       Réponse XML partial-response → parse table HTML
+ *       Pagination automatique jusqu'à 50 résultats (5 pages × 10)
+ * BE → medicinesdatabase.be (FAMHP) — API REST Angular SPA
+ *       Découverte par reverse-engineering du bundle Angular (avril 2026)
+ *       Clé HMAC dynamique : GET /api/config → {key}
+ *       Token xsrf-token : JWT HS256 signé → sig.jti+exp
+ *       Payload JWT : {a: userAgent, exp: now+300, jti: timestamp*rand}
+ *       Réponse JSON : {rows: N, data: [{name, company, availability[], ...}]}
+ *       Cache : 20 min par substance
  */
 
-const https = require('https');
-const zlib  = require('zlib');
+const https  = require('https');
+const zlib   = require('zlib');
+const crypto = require('crypto');
 
 const HEADERS = {
   'Content-Type': 'application/json',
@@ -24,7 +35,7 @@ const COUNTRY_LINKS = {
   fr: 'https://base-donnees-publique.medicaments.gouv.fr/',
   es: 'https://cima.aemps.es/cima/publico/home.html',
   pt: 'https://extranet.infarmed.pt/INFOMED-fo/',
-  be: 'https://www.famhp.be/en/human_use/medicines/medicines/information_about_medicines/authorised_medicines_in_belgium'
+  be: 'https://medicinesdatabase.be/human-use'
 };
 
 // ─── Cache session BDPM (cookie PHP de session, 25 min) ──────────────────────
@@ -121,6 +132,90 @@ async function httpGetJson(url, timeoutMs, extraHeaders) {
   return JSON.parse(buf.toString('utf8'));
 }
 
+// ─── Helper : GET retournant {statusCode, headers, body:string} ───────────────
+function httpGetRaw(url, timeoutMs, extraHeaders) {
+  return new Promise((resolve, reject) => {
+    let parsed;
+    try { parsed = new URL(url); } catch(e) { return reject(new Error('URL invalide: ' + url)); }
+    const options = {
+      hostname: parsed.hostname,
+      path:     parsed.pathname + parsed.search,
+      method:   'GET',
+      timeout:  timeoutMs,
+      headers: Object.assign({
+        'User-Agent':      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Encoding': 'gzip, deflate'
+      }, extraHeaders || {})
+    };
+    const req = https.request(options, (res) => {
+      if ([301, 302, 303, 307, 308].includes(res.statusCode)) {
+        res.resume();
+        const loc = res.headers.location;
+        if (!loc) return reject(new Error('Redirection sans Location'));
+        const abs = loc.startsWith('http') ? loc : parsed.protocol + '//' + parsed.host + loc;
+        return httpGetRaw(abs, timeoutMs, extraHeaders).then(resolve).catch(reject);
+      }
+      let stream = res;
+      const enc = res.headers['content-encoding'];
+      if (enc === 'gzip')    stream = res.pipe(zlib.createGunzip());
+      if (enc === 'deflate') stream = res.pipe(zlib.createInflate());
+      const chunks = [];
+      stream.on('data', c => chunks.push(c));
+      stream.on('end', () => resolve({
+        statusCode: res.statusCode,
+        headers:    res.headers,
+        body:       Buffer.concat(chunks).toString('utf8')
+      }));
+      stream.on('error', reject);
+    });
+    req.on('timeout', () => { req.destroy(); reject(new Error('timeout: ' + url.slice(0, 80))); });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+// ─── Helper : POST retournant le body string ──────────────────────────────────
+function httpPostRaw(url, postBody, timeoutMs, extraHeaders) {
+  return new Promise((resolve, reject) => {
+    let parsed;
+    try { parsed = new URL(url); } catch(e) { return reject(new Error('URL invalide: ' + url)); }
+    const bodyBuf = Buffer.from(postBody, 'utf8');
+    const options = {
+      hostname: parsed.hostname,
+      path:     parsed.pathname + parsed.search,
+      method:   'POST',
+      timeout:  timeoutMs,
+      headers: Object.assign({
+        'User-Agent':      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Encoding': 'gzip, deflate',
+        'Content-Length':  String(bodyBuf.length)
+      }, extraHeaders || {})
+    };
+    const req = https.request(options, (res) => {
+      let stream = res;
+      const enc = res.headers['content-encoding'];
+      if (enc === 'gzip')    stream = res.pipe(zlib.createGunzip());
+      if (enc === 'deflate') stream = res.pipe(zlib.createInflate());
+      const chunks = [];
+      stream.on('data', c => chunks.push(c));
+      stream.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+      stream.on('error', reject);
+    });
+    req.on('timeout', () => { req.destroy(); reject(new Error('timeout POST: ' + url.slice(0, 80))); });
+    req.on('error', reject);
+    req.write(bodyBuf);
+    req.end();
+  });
+}
+
+// ─── Helper : extraire les cookies depuis les headers Set-Cookie ──────────────
+function extractCookies(headers) {
+  const sc = headers['set-cookie'];
+  if (!sc) return '';
+  const arr = Array.isArray(sc) ? sc : [sc];
+  return arr.map(c => c.split(';')[0]).join('; ');
+}
+
 // ─── Obtenir (ou renouveler) le cookie de session BDPM ───────────────────────
 async function getBdpmSessionCookie() {
   if (_bdpmCookie && (Date.now() - _bdpmCookie.ts) < BDPM_COOKIE_TTL) {
@@ -193,6 +288,326 @@ async function fetchFrance(substance) {
     }));
 }
 
+// ─── Portugal — INFARMED INFOMED (JSF/PrimeFaces scraping) ───────────────────
+// Cache par substance (20 min)
+const _ptCache = new Map();
+const PT_CACHE_TTL = 20 * 60 * 1000;
+
+// Tous les champs du formulaire pesquisa-avancada (37 champs)
+function infomedFormFields(substance, viewState, extraPaginationFields) {
+  const base = {
+    'mainForm': 'mainForm',
+    'mainForm:dci_input': substance,
+    'mainForm:ff_focus': '', 'mainForm:ff_input': '',
+    'mainForm:dosagem_input': '', 'mainForm:medicamento_input': '',
+    'mainForm:taim_input': '', 'mainForm:num-processo': '',
+    'mainForm:vias-admin_focus': '', 'mainForm:vias-admin_input': '',
+    'mainForm:grupo-produto_focus': '', 'mainForm:grupo-produto_input': '',
+    'mainForm:generico_focus': '', 'mainForm:generico_input': '',
+    'mainForm:numero-registro': '', 'mainForm:cnpem': '', 'mainForm:chnm': '',
+    'mainForm:margem-terap_focus': '', 'mainForm:margem-terap_input': '',
+    'mainForm:monit-adicional_focus': '', 'mainForm:monit-adicional_input': '',
+    'mainForm:exist-docs-mmr_focus': '', 'mainForm:exist-docs-mmr_input': '',
+    'mainForm:estado-aim_focus': '', 'mainForm:estado-aim_input': '',
+    'mainForm:estado-aim-de_input': '', 'mainForm:estado-aim-a_input': '',
+    'mainForm:estado-comercializacao_focus': '', 'mainForm:estado-comercializacao_input': '',
+    'mainForm:classif-dispensa_focus': '', 'mainForm:classif-dispensa_input': '',
+    'mainForm:classif-farmacoterapeutica_focus': '', 'mainForm:classif-farmacoterapeutica_input': '',
+    'mainForm:classif-atc_focus': '', 'mainForm:classif-atc_input': '',
+    'mainForm:dt-medicamentos_rppDD': '10',
+    'javax.faces.ViewState': viewState
+  };
+  return Object.assign(base, extraPaginationFields || {});
+}
+
+function toUrlEncoded(fields) {
+  return Object.entries(fields)
+    .map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(v || ''))
+    .join('&');
+}
+
+// Extraire ViewState depuis HTML ou XML de réponse INFOMED
+function extractInfomedViewState(text) {
+  // HTML form field
+  const m1 = text.match(/name="javax\.faces\.ViewState"[^>]*value="([^"]+)"/);
+  if (m1) return m1[1];
+  // XML partial-response update
+  const m2 = text.match(/<update id="[^"]*ViewState[^"]*"><!\[CDATA\[([^\]]+)\]\]><\/update>/);
+  if (m2) return m2[1];
+  return null;
+}
+
+// Parser la table HTML partielle retournée par PrimeFaces
+function parseInfomedTableHtml(tableHtml) {
+  if (!tableHtml || tableHtml.includes('ui-datatable-empty-message')) return [];
+
+  const tbodyM = tableHtml.match(/<tbody[^>]*>([\s\S]*?)<\/tbody>/);
+  if (!tbodyM) return [];
+
+  const products = [];
+  const rows = tbodyM[1].split('</tr>');
+
+  for (const row of rows) {
+    if (!row.includes('<td')) continue;
+
+    // Nom = lien linkNome dans la colonne 1
+    const nameM = row.match(/<a[^>]+id="[^"]*linkNome"[^>]*>([^<]+)<\/a>/);
+    if (!nameM) continue;
+    const name = nameM[1].trim();
+
+    // Splitter les cellules sur <td
+    const parts = row.split('<td');
+    // parts[0]=avant 1er td, parts[1]=col0(ID), parts[2]=col1(nom),
+    // parts[3]=col2(DCI), parts[4]=col3(forme), parts[5]=col4(dosage),
+    // parts[6]=col5(titulaire), parts[7]=col6(icône statut)
+    if (parts.length < 7) continue;
+
+    const getCellText = (part) => {
+      if (!part) return '';
+      const gt = part.indexOf('>');
+      if (gt === -1) return '';
+      const content = part.slice(gt + 1);
+      const end = content.indexOf('</td>');
+      const html = end > -1 ? content.slice(0, end) : content;
+      return html
+        .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    };
+
+    const holder     = getCellText(parts[6]);
+    const statusHtml = parts[7] || '';
+    const marketed   = statusHtml.includes('ui-icon-truck');
+
+    products.push({
+      name,
+      holder: holder || '',
+      status: marketed ? 'Comercializado' : 'Autorizado'
+    });
+  }
+  return products;
+}
+
+async function fetchPortugal(substance) {
+  const cached = _ptCache.get(substance);
+  if (cached && (Date.now() - cached.ts) < PT_CACHE_TTL) {
+    console.log('[INFOMED] Cache hit: ' + substance);
+    return cached.products;
+  }
+
+  const BASE = 'https://extranet.infarmed.pt/INFOMED-fo/pesquisa-avancada.xhtml';
+  const AJAX_HEADERS = {
+    'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+    'Accept': 'application/xml, text/xml, */*; q=0.01',
+    'X-Requested-With': 'XMLHttpRequest',
+    'Faces-Request': 'partial/ajax',
+    'Accept-Language': 'pt-PT,pt;q=0.9,en;q=0.8',
+    'Referer': BASE,
+    'Origin': 'https://extranet.infarmed.pt'
+  };
+
+  // 1. GET → JSESSIONID + ViewState
+  console.log('[INFOMED] GET page...');
+  const getRes = await httpGetRaw(BASE, 12000, {
+    'Accept': 'text/html,application/xhtml+xml,*/*;q=0.9',
+    'Accept-Language': 'pt-PT,pt;q=0.9,en;q=0.8'
+  });
+  if (getRes.statusCode < 200 || getRes.statusCode >= 300) {
+    throw new Error('INFOMED GET status ' + getRes.statusCode);
+  }
+
+  const cookie    = extractCookies(getRes.headers);
+  let   viewState = extractInfomedViewState(getRes.body);
+  if (!viewState) throw new Error('INFOMED ViewState introuvable');
+  console.log('[INFOMED] Session obtenue, ViewState: ' + viewState.slice(0, 20) + '...');
+
+  const reqHeaders = Object.assign({ 'Cookie': cookie }, AJAX_HEADERS);
+
+  // 2. POST recherche (page 1)
+  const searchFields = Object.assign(infomedFormFields(substance, viewState), {
+    'javax.faces.partial.ajax': 'true',
+    'javax.faces.source': 'mainForm:btnDoSearch',
+    'javax.faces.partial.execute': 'mainForm:pnlCriterios mainForm:btnDoSearch',
+    'javax.faces.partial.render': 'messages minLenghtMessage mainForm:dt-medicamentos mainForm:dg-medicamentos mainForm:dciMessage mainForm:nomeMessage mainForm:taimMessage mainForm:numProcessoMessage mainForm:nrRegistoMessage mainForm:cnpemMessage mainForm:chnmMessage mainForm:data-invertida-message',
+    'mainForm:btnDoSearch': 'mainForm:btnDoSearch'
+  });
+
+  console.log('[INFOMED] POST recherche: ' + substance);
+  const searchXml = await httpPostRaw(BASE, toUrlEncoded(searchFields), 15000, reqHeaders);
+
+  // Extraire la table et le total
+  const tblM = searchXml.match(/<update id="mainForm:dt-medicamentos"><!\[CDATA\[([\s\S]*?)\]\]><\/update>/);
+  if (!tblM) {
+    console.log('[INFOMED] Pas de table dans la réponse XML');
+    _ptCache.set(substance, { products: [], ts: Date.now() });
+    return [];
+  }
+
+  let allProducts = parseInfomedTableHtml(tblM[1]);
+  console.log('[INFOMED] Page 1: ' + allProducts.length + ' produits');
+
+  // Extraire total depuis texte paginateur
+  const totalM = searchXml.match(/A mostrar \d+ - \d+ de um total de (\d+) registos/);
+  const total  = totalM ? parseInt(totalM[1], 10) : allProducts.length;
+  console.log('[INFOMED] Total: ' + total + ' produits');
+
+  // Mettre à jour ViewState depuis la réponse XML
+  const newVs = extractInfomedViewState(searchXml);
+  if (newVs) viewState = newVs;
+
+  // 3. Pagination si nécessaire (max 5 pages = 50 résultats)
+  const ROWS_PER_PAGE = 10;
+  const MAX_PAGES     = 5;
+  const totalPages    = Math.ceil(total / ROWS_PER_PAGE);
+  const pagesToFetch  = Math.min(totalPages, MAX_PAGES);
+
+  for (let page = 2; page <= pagesToFetch; page++) {
+    const offset = (page - 1) * ROWS_PER_PAGE;
+    const pageFields = Object.assign(infomedFormFields(substance, viewState), {
+      'javax.faces.partial.ajax': 'true',
+      'javax.faces.source': 'mainForm:dt-medicamentos',
+      'javax.faces.partial.execute': 'mainForm:dt-medicamentos',
+      'javax.faces.partial.render': 'mainForm:dt-medicamentos',
+      'mainForm:dt-medicamentos': 'mainForm:dt-medicamentos',
+      'mainForm:dt-medicamentos_pagination': 'true',
+      'mainForm:dt-medicamentos_first': String(offset),
+      'mainForm:dt-medicamentos_rows': String(ROWS_PER_PAGE),
+      'mainForm:dt-medicamentos_encodeFeature': 'true'
+    });
+
+    try {
+      console.log('[INFOMED] Page ' + page + ' (first=' + offset + ')...');
+      const pageXml = await httpPostRaw(BASE, toUrlEncoded(pageFields), 12000, reqHeaders);
+      const pageTblM = pageXml.match(/<update id="mainForm:dt-medicamentos"><!\[CDATA\[([\s\S]*?)\]\]><\/update>/);
+      if (pageTblM) {
+        const pageProducts = parseInfomedTableHtml(pageTblM[1]);
+        console.log('[INFOMED] Page ' + page + ': ' + pageProducts.length + ' produits');
+        allProducts = allProducts.concat(pageProducts);
+      }
+      const vs2 = extractInfomedViewState(pageXml);
+      if (vs2) viewState = vs2;
+    } catch (e) {
+      console.warn('[INFOMED] Erreur page ' + page + ': ' + e.message);
+      break;
+    }
+  }
+
+  // Dédupliquer (même nom + même titulaire)
+  const seen = new Set();
+  const unique = allProducts.filter(p => {
+    const key = (p.name + '|' + p.holder).toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  console.log('[INFOMED] ' + unique.length + ' produits uniques pour: ' + substance);
+  _ptCache.set(substance, { products: unique, ts: Date.now() });
+  return unique;
+}
+
+// ─── Belgique — medicinesdatabase.be (FAMHP) API REST Angular ────────────────
+// Découverte par reverse-engineering du bundle Angular main-K24IBCSL.js (avril 2026)
+// Méthode ConfigService.getT() :
+//   r = (Date.now() * Math.floor(Math.random()*1e4)).toString()  // JTI
+//   o = Math.floor(Date.now()/1000 + 300)                        // exp
+//   JWT payload = {a: userAgent, exp: o, jti: r}
+//   token = jwt.split('.').pop() + '.' + r + o.toString()
+//   → token = base64url(HMAC-SHA256(header.payload)) + '.' + jti + exp
+// Clé HMAC : GET /api/config → {key: "L4a};kgv(F30", ...}  (publique, sans auth)
+// Réponse   : GET /api/products?term=X&usage=human&v=... → {rows:N, data:[{...}]}
+const _beCache     = new Map();
+const BE_CACHE_TTL = 20 * 60 * 1000;
+
+// Cache de la config FAMHP (clé HMAC + version API, 1h)
+let _beConfigCache = null;
+const BE_CONFIG_TTL = 60 * 60 * 1000;
+
+// User-Agent fixe utilisé à la fois dans le JWT (champ "a") et dans la requête HTTP
+const BE_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
+async function getBelgiumConfig() {
+  if (_beConfigCache && (Date.now() - _beConfigCache.ts) < BE_CONFIG_TTL) {
+    return _beConfigCache;
+  }
+  console.log('[FAMHP] Récupération /api/config...');
+  const data = await httpGetJson('https://medicinesdatabase.be/api/config', 8000, {
+    'Accept':       'application/json',
+    'Referer':      'https://medicinesdatabase.be/',
+    'User-Agent':   BE_UA
+  });
+  _beConfigCache = {
+    key:     data.key,
+    version: data.version || '1.4.132-en',
+    ts:      Date.now()
+  };
+  console.log('[FAMHP] Config: key=' + data.key.slice(0, 4) + '***');
+  return _beConfigCache;
+}
+
+function generateBelgiumToken(configKey) {
+  const r       = (Date.now() * Math.floor(Math.random() * 1e4)).toString();
+  const o       = Math.floor(Date.now() / 1e3 + 300);
+  const payload = { a: BE_UA, exp: o, jti: r };
+  const header  = { alg: 'HS256', typ: 'JWT' };
+  const encH    = Buffer.from(JSON.stringify(header)).toString('base64url');
+  const encP    = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const sigInput = encH + '.' + encP;
+  const sig     = crypto.createHmac('sha256', Buffer.from(configKey, 'utf8'))
+                        .update(sigInput)
+                        .digest('base64url');
+  return sig + '.' + r + o.toString();
+}
+
+async function fetchBelgium(substance) {
+  const cached = _beCache.get(substance);
+  if (cached && (Date.now() - cached.ts) < BE_CACHE_TTL) {
+    console.log('[FAMHP] Cache hit: ' + substance);
+    return cached.products;
+  }
+
+  const config = await getBelgiumConfig();
+  const token  = generateBelgiumToken(config.key);
+
+  const url = 'https://medicinesdatabase.be/api/products'
+    + '?startRow=0&RPP=100&orderBy%5B%5D=name%20asc'
+    + '&term='  + encodeURIComponent(substance)
+    + '&usage=human'
+    + '&v='    + encodeURIComponent(config.version);
+
+  console.log('[FAMHP] GET products: ' + substance);
+  const data = await httpGetJson(url, 12000, {
+    'Accept':       'application/json',
+    'Referer':      'https://medicinesdatabase.be/',
+    'Origin':       'https://medicinesdatabase.be',
+    'User-Agent':   BE_UA,
+    'xsrf-token':   token
+  });
+
+  if (!data.data || !Array.isArray(data.data)) {
+    console.log('[FAMHP] Réponse inattendue: ' + JSON.stringify(data).slice(0, 100));
+    _beCache.set(substance, { products: [], ts: Date.now() });
+    return [];
+  }
+
+  console.log('[FAMHP] ' + data.rows + ' produits pour: ' + substance);
+
+  // availability est un tableau : ["available"], ["not_commercialised"], ou les deux
+  const products = data.data.map(p => {
+    const avail = Array.isArray(p.availability) ? p.availability : [];
+    const status = avail.includes('available') ? 'Commercialisé' : 'Non commercialisé';
+    return {
+      name:   p.name    || '',
+      holder: p.company || '',
+      status
+    };
+  }).filter(p => p.name);
+
+  _beCache.set(substance, { products, ts: Date.now() });
+  return products;
+}
+
 // ─── Espagne — CIMA REST API v1.23 ───────────────────────────────────────────
 // Tente lowercase, Titlecase, UPPERCASE si 0 résultat (CIMA est case-sensitive)
 async function fetchSpain(substance) {
@@ -247,10 +662,10 @@ exports.handler = async function(event) {
   }
 
   const SOURCES = {
-    fr: { label: 'BDPM / ANSM',  fetch: () => fetchFrance(substance) },
-    es: { label: 'CIMA / AEMPS', fetch: () => fetchSpain(substance)  },
-    pt: { label: 'INFARMED',     fetch: () => Promise.resolve(null)  },
-    be: { label: 'SAM / FAMHP',  fetch: () => Promise.resolve(null)  }
+    fr: { label: 'BDPM / ANSM',             fetch: () => fetchFrance(substance)   },
+    es: { label: 'CIMA / AEMPS',            fetch: () => fetchSpain(substance)    },
+    pt: { label: 'INFARMED',                fetch: () => fetchPortugal(substance) },
+    be: { label: 'medicinesdatabase / FAMHP', fetch: () => fetchBelgium(substance)  }
   };
 
   const meta = SOURCES[country];
@@ -259,7 +674,7 @@ exports.handler = async function(event) {
   }
 
   // Pays avec une API/données publiques accessibles (null = inaccessible, pas "pas d'API")
-  const HAS_API = new Set(['fr', 'es']);
+  const HAS_API = new Set(['fr', 'es', 'pt', 'be']);
 
   try {
     const result = await meta.fetch();
@@ -274,7 +689,7 @@ exports.handler = async function(event) {
           link: COUNTRY_LINKS[country] || null
         };
       } else {
-        // PT, BE — pas d'API JSON publique
+        // Pays sans API publique connue
         countryData = {
           country, source: meta.label,
           products: [], total: 0,
