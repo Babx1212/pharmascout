@@ -347,41 +347,61 @@ function identifyReference(mono) {
 // PHARMACOVIGILANCE (conservée de swissmedic.js)
 // ──────────────────────────────────────────────────
 
+/**
+ * Vérification pharmacovigilance Swissmedic.
+ * Scrape deux pages :
+ *  1. Index global de toutes les éditions Vigilance News (couverture historique large)
+ *  2. Page de résumé de l'édition courante (fallback/confirmation)
+ * Utilise les stems pharmaceutiques pour le matching (cohérence avec l'Excel).
+ */
 async function checkPharmacovigilance(substance) {
   let pvAlert = false;
   let pvDetails = null;
-  try {
-    const pvUrl = 'https://www.swissmedic.ch/swissmedic/en/home/humanarzneimittel/market-surveillance/pharmacovigilance/vigilance-news.html';
-    const pvHtml = await fetchText(pvUrl);
-    const htmlLower = pvHtml.toLowerCase();
 
-    // Utiliser les mêmes racines que pour l'Excel (cohérence de matching)
-    const stems = buildSearchStems(substance);
+  // Pages à scraper — du plus large au plus récent
+  const pvPages = [
+    // Index de toutes les éditions (page qui liste TOUS les Vigilance News et leurs sujets)
+    'https://www.swissmedic.ch/swissmedic/en/home/humanarzneimittel/market-surveillance/pharmacovigilance/vigilance-news/vigilance-news.html',
+    // Page d'actualités récentes (fallback)
+    'https://www.swissmedic.ch/swissmedic/en/home/humanarzneimittel/market-surveillance/pharmacovigilance/vigilance-news.html'
+  ];
 
-    // Chercher la meilleure correspondance : du stem le plus long au plus court
-    let matchedStem = null;
-    for (const stem of stems) {
-      if (stem.length >= 5 && htmlLower.includes(stem)) {
-        matchedStem = stem;
-        break; // stems triés par longueur décroissante → premier match = plus spécifique
+  const stems = buildSearchStems(substance);
+
+  for (const pvUrl of pvPages) {
+    try {
+      const pvHtml = await fetchText(pvUrl, 8000);
+      const htmlLower = pvHtml.toLowerCase();
+
+      let matchedStem = null;
+      for (const stem of stems) {
+        if (stem.length >= 5 && htmlLower.includes(stem)) {
+          matchedStem = stem;
+          break;
+        }
       }
-    }
 
-    if (matchedStem) {
-      pvAlert = true;
-      // Chercher un lien associé au terme trouvé
-      const escaped = matchedStem.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const linkPattern = new RegExp(
-        `<a[^>]+href="([^"]+)"[^>]*>[^<]*${escaped}[^<]*<\\/a>`, 'i'
-      );
-      const linkMatch = pvHtml.match(linkPattern);
-      if (linkMatch) {
-        pvDetails = linkMatch[1].startsWith('http')
-          ? linkMatch[1]
-          : 'https://www.swissmedic.ch' + linkMatch[1];
+      if (matchedStem) {
+        pvAlert = true;
+        // Chercher un lien dans le contexte du terme trouvé
+        const escaped = matchedStem.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const linkPattern = new RegExp(
+          `<a[^>]+href="([^"]+)"[^>]*>[^<]{0,80}${escaped}[^<]{0,80}<\\/a>`, 'i'
+        );
+        const linkMatch = pvHtml.match(linkPattern);
+        if (linkMatch) {
+          pvDetails = linkMatch[1].startsWith('http')
+            ? linkMatch[1]
+            : 'https://www.swissmedic.ch' + linkMatch[1];
+        } else {
+          // Pas de lien direct → pointer vers la page d'index
+          pvDetails = pvUrl;
+        }
+        break; // match trouvé, pas besoin de continuer
       }
-    }
-  } catch (_) { /* pharmacovigilance non bloquante */ }
+    } catch (_) { /* chaque page est non bloquante */ }
+  }
+
   return { pvAlert, pvDetails };
 }
 
