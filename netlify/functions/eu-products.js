@@ -1,5 +1,5 @@
 /**
- * PharmaScout — Netlify Function : EU Products v13
+ * PharmaScout — Netlify Function : EU Products v14
  *
  * FR → BDPM REST API interne (/api/produit/by-substance-active)
  *       Découverte par reverse-engineering du bundle JS de la SPA BDPM (avril 2026)
@@ -636,7 +636,12 @@ async function fetchBelgium(substance) {
   const products = allData.map(p => {
     const avail  = Array.isArray(p.availability) ? p.availability : [];
     const status = avail.includes('available') ? 'Commercialisé' : 'Non commercialisé';
-    return { name: p.name || '', holder: p.company || '', status };
+    // activeSubstanceShort inclus pour le filtrage combo côté handler
+    const obj = { name: p.name || '', holder: p.company || '', status };
+    if (Array.isArray(p.activeSubstanceShort) && p.activeSubstanceShort.length > 0) {
+      obj._substances = p.activeSubstanceShort.map(s => s.toLowerCase());
+    }
+    return obj;
   }).filter(p => p.name);
 
   console.log('[FAMHP] ' + products.length + ' produits retenus pour: ' + substance);
@@ -684,23 +689,57 @@ async function fetchSpain(substance) {
   return result;
 }
 
+// ─── Helper : filtrage combinaison A/B ────────────────────────────────────────
+// Si la substance contient '/', on cherche avec la partie principale (avant /)
+// et on filtre les résultats dont le nom contient les autres parties.
+// Ex : "calcipotriol/betamethasone dipropionate"
+//      → cherche "calcipotriol", filtre résultats contenant "betamethasone"
+function parseCombo(raw) {
+  const parts = raw.split('/').map(s => s.trim()).filter(Boolean);
+  if (parts.length <= 1) return { primary: raw, filters: [] };
+  // Pour chaque terme secondaire, garder le premier mot significatif (>4 chars)
+  // pour le matching souple : "betamethasone dipropionate" → match "betamethasone"
+  const filters = parts.slice(1).map(term => {
+    const words = term.split(/\s+/).filter(w => w.length > 4);
+    return words[0] || term;   // premier mot long, ou terme entier si court
+  });
+  return { primary: parts[0], filters };
+}
+
+function applyComboFilter(products, filters) {
+  if (!filters || filters.length === 0) return products;
+  return products.filter(p => {
+    const nameLow  = (p.name || '').toLowerCase();
+    // _substances : tableau de DCI (fourni par l'API Belgique, Portugal à venir)
+    const subsList = (p._substances || []).join(' ');
+    const haystack = nameLow + ' ' + subsList;
+    return filters.every(f => haystack.includes(f.toLowerCase()));
+  });
+}
+
 // ─── Handler principal ────────────────────────────────────────────────────────
 exports.handler = async function(event) {
   if (event.httpMethod === 'OPTIONS') {
     return { statusCode: 200, headers: HEADERS, body: '' };
   }
 
-  const substance = (event.queryStringParameters?.substance || '').trim().toLowerCase();
-  const country   = (event.queryStringParameters?.country   || '').trim().toLowerCase();
+  const rawSubstance = (event.queryStringParameters?.substance || '').trim().toLowerCase();
+  const country      = (event.queryStringParameters?.country   || '').trim().toLowerCase();
 
-  if (!substance) {
+  if (!rawSubstance) {
     return { statusCode: 400, headers: HEADERS, body: JSON.stringify({ error: 'Substance manquante' }) };
   }
 
+  // Gestion des combinaisons A/B (ex: "calcipotriol/betamethasone dipropionate")
+  const { primary: substance, filters: comboFilters } = parseCombo(rawSubstance);
+  if (comboFilters.length > 0) {
+    console.log('[combo] Recherche "' + rawSubstance + '" → primary="' + substance + '" filters=' + JSON.stringify(comboFilters));
+  }
+
   const SOURCES = {
-    fr: { label: 'BDPM / ANSM',             fetch: () => fetchFrance(substance)   },
-    es: { label: 'CIMA / AEMPS',            fetch: () => fetchSpain(substance)    },
-    pt: { label: 'INFARMED',                fetch: () => fetchPortugal(substance) },
+    fr: { label: 'BDPM / ANSM',              fetch: () => fetchFrance(substance)    },
+    es: { label: 'CIMA / AEMPS',             fetch: () => fetchSpain(substance)     },
+    pt: { label: 'INFARMED',                 fetch: () => fetchPortugal(substance)  },
     be: { label: 'medicinesdatabase / FAMHP', fetch: () => fetchBelgium(substance)  }
   };
 
@@ -734,7 +773,15 @@ exports.handler = async function(event) {
         };
       }
     } else {
-      const products = Array.isArray(result) ? result : [];
+      let products = Array.isArray(result) ? result : [];
+      // Filtre combinaison si recherche A/B
+      if (comboFilters.length > 0) {
+        const before = products.length;
+        products = applyComboFilter(products, comboFilters);
+        console.log('[combo] Filtre "' + comboFilters.join('+') + '": ' + before + ' → ' + products.length + ' produits');
+      }
+      // Supprimer le champ interne _substances avant de retourner au client
+      products = products.map(({ _substances, ...rest }) => rest);
       countryData = {
         country, source: meta.label,
         products, total: products.length
