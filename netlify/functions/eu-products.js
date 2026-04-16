@@ -1,5 +1,5 @@
 /**
- * PharmaScout — Netlify Function : EU Products v17
+ * PharmaScout — Netlify Function : EU Products v18
  *
  * FR → BDPM REST API interne (/api/produit/by-substance-active)
  *       Découverte par reverse-engineering du bundle JS de la SPA BDPM (avril 2026)
@@ -874,11 +874,26 @@ exports.handler = async function(event) {
       }
     } else {
       let products = Array.isArray(result) ? result : [];
-      // Filtre combinaison si recherche A/B
+      // ─── Filtrage combinaison A/B ─────────────────────────────────────────────
       if (comboFilters.length > 0) {
         const before = products.length;
-        products = applyComboFilter(products, comboFilters);
-        console.log('[combo] Filtre "' + comboFilters.join('+') + '": ' + before + ' → ' + products.length + ' produits');
+
+        if (country === 'fr') {
+          // France — BDPM ne retourne pas les DCI dans ses résultats.
+          // Stratégie : intersection par nom de produit entre les recherches des
+          // différentes substances (ex : ceftazidime ∩ avibactam → ZAVICEFTA).
+          // On lance les recherches des filtres en parallèle pour limiter la latence.
+          const filterResults = await Promise.all(
+            comboFilters.map(f => fetchFrance(f).catch(() => []))
+          );
+          const filterSets = filterResults.map(r => new Set((r || []).map(p => p.name)));
+          products = products.filter(p => filterSets.every(ns => ns.has(p.name)));
+          console.log('[combo:FR] Intersection ' + comboFilters.join('+') + ': ' + before + ' → ' + products.length);
+        } else {
+          // BE / ES / PT — filtrage via _substances (DCI stockées par chaque fetch)
+          products = applyComboFilter(products, comboFilters);
+          console.log('[combo] Filtre "' + comboFilters.join('+') + '": ' + before + ' → ' + products.length + ' produits');
+        }
       }
       // Supprimer le champ interne _substances avant de retourner au client
       products = products.map(({ _substances, ...rest }) => rest);
