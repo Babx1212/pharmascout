@@ -1279,6 +1279,9 @@ function resetResults() {
   // Reset score banner styling
   const scoreNum = document.getElementById('score-number');
   if (scoreNum) { scoreNum.className = 'score-number'; }
+
+  // Reset cache Swissmedic CH (évite injection de données de l'analyse précédente)
+  window._swissmedicProducts = null;
 }
 
 // ------------------------------------------------------------
@@ -2090,27 +2093,29 @@ async function analyze() {
   let substance = document.getElementById('substance-input').value.trim().toLowerCase();
   if (!substance) return;
 
+  document.getElementById('analyze-btn').disabled = true;
+
+  // Reset immédiat dès le clic — évite tout affichage résiduel de l'analyse précédente
+  state.substance = substance;
+  window._swissmedicProducts = null;
+  resetResults();
+  setResults(false);
+
   // Normalisation automatique via RxNorm avant l'analyse
   setLoading(true, '🔍 Vérification du nom INN (RxNorm)...', 5);
-  document.getElementById('analyze-btn').disabled = true;
   try {
     const r = await fetch(`https://rxnav.nlm.nih.gov/REST/spellingsuggestions.json?name=${encodeURIComponent(substance)}`);
     const d = await r.json();
     const suggestion = d.suggestionGroup?.suggestionList?.suggestion?.[0];
-    if 
-(suggestion && suggestion.toLowerCase() !== substance) {
+    if (suggestion && suggestion.toLowerCase() !== substance) {
       substance = suggestion.toLowerCase();
+      state.substance = substance;
       document.getElementById('substance-input').value = suggestion;
       document.getElementById('rxnorm-validated-text').textContent = suggestion;
       document.getElementById('rxnorm-validated').style.display = 'block';
       document.getElementById('rxnorm-suggestion').style.display = 'none';
     }
   } catch(e) { /* RxNorm indisponible, on continue avec le nom saisi */ }
-
-  state.substance 
-= substance;
-  resetResults();
-  setResults(false);
 
   try {
     setLoading(true, '📡 FDA FAERS · Orange Book · PubMed...', 20);
@@ -2400,12 +2405,14 @@ function renderEMA(d) {
   document.getElementById('ema-search-link').href =
     d.searchUrl || `https://www.ema.europa.eu/en/search?search_api_fulltext=${encodeURIComponent(d.substance)}`;
 
-  // ---- Injecter signal EMA dans l'onglet Sécurité ----    // Produits EMA
+  // ---- Produits EMA ----
   if (d.products && d.products.length > 0) {
     show('ema-products-section');
     document.getElementById('ema-products-body').innerHTML = d.products.map(p =>
       `<tr><td>${p.name||'--'}</td><td style="color:var(--text-muted)">${p.holder||'--'}</td><td style="color:var(--text-muted)">${p.status||'--'}</td></tr>`
     ).join('');
+  } else {
+    hide('ema-products-section');
   }
   injectEmaFlagsIntoSafety(d);
 }
