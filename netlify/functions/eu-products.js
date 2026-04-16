@@ -1,5 +1,5 @@
 /**
- * PharmaScout — Netlify Function : EU Products v12
+ * PharmaScout — Netlify Function : EU Products v13
  *
  * FR → BDPM REST API interne (/api/produit/by-substance-active)
  *       Découverte par reverse-engineering du bundle JS de la SPA BDPM (avril 2026)
@@ -505,6 +505,16 @@ async function fetchPortugal(substance) {
   });
 
   console.log('[INFOMED] ' + unique.length + ' produits uniques pour: ' + substance);
+
+  // Fallback DCI portugais : si 0 résultat et substance se termine par 'e',
+  // tenter la variante en 'a' (finasteride→finasterida, dutasteride→dutasterida, etc.)
+  if (unique.length === 0 && substance.endsWith('e')) {
+    const ptVariant = substance.slice(0, -1) + 'a';
+    console.log('[INFOMED] 0 résultat — retry variante PT: ' + ptVariant);
+    // On ne met pas en cache la version vide, on relance avec la variante
+    return fetchPortugal(ptVariant);
+  }
+
   _ptCache.set(substance, { products: unique, ts: Date.now() });
   return unique;
 }
