@@ -95,6 +95,35 @@ async function httpGetJson(url, timeoutMs) {
   return JSON.parse(buf.toString('utf8'));
 }
 
+// URLs directes de téléchargement BDPM (serveur gouvernemental)
+// Candidates dans l'ordre de préférence — la première qui répond HTTP 200 est utilisée
+const BDPM_CIS_CANDIDATES = [
+  'https://base-donnees-publique.medicaments.gouv.fr/telechargement.php?fichier=CIS_bdpm.txt',
+  'http://base-donnees-publique.medicaments.gouv.fr/telechargement.php?fichier=CIS_bdpm.txt'
+];
+const BDPM_COMPO_CANDIDATES = [
+  'https://base-donnees-publique.medicaments.gouv.fr/telechargement.php?fichier=CIS_COMPO_bdpm.txt',
+  'http://base-donnees-publique.medicaments.gouv.fr/telechargement.php?fichier=CIS_COMPO_bdpm.txt'
+];
+
+// Télécharger depuis la première URL candidate qui fonctionne
+async function downloadFirstWorking(candidates, label, timeoutMs) {
+  let lastErr = null;
+  for (const url of candidates) {
+    try {
+      console.log('[BDPM] Tentative ' + label + ': ' + url.slice(0, 80));
+      const buf = await httpGet(url, timeoutMs);
+      if (buf.length < 1000) throw new Error('Réponse trop courte (' + buf.length + ' octets) — probablement pas le CSV');
+      console.log('[BDPM] OK ' + label + ': ' + buf.length + ' octets');
+      return buf;
+    } catch(e) {
+      console.warn('[BDPM] Échec ' + label + ' [' + url.slice(-40) + ']: ' + e.message);
+      lastErr = e;
+    }
+  }
+  throw new Error(label + ' inaccessible: ' + (lastErr ? lastErr.message : 'inconnu'));
+}
+
 // ─── Charger (ou renvoyer depuis cache) les deux Maps BDPM ───────────────────
 async function loadBdpmMaps() {
   // Cache encore valide ?
@@ -103,51 +132,12 @@ async function loadBdpmMaps() {
     return _bdpmCache;
   }
 
-  console.log('[BDPM] Chargement des CSV via data.gouv.fr...');
+  console.log('[BDPM] Chargement des CSV BDPM (téléchargement direct)...');
 
-  // 1. Récupérer les métadonnées du dataset pour obtenir les URLs CDN actuelles
-  const dataset = await httpGetJson(DATAGOUV_DATASET_API, 12000);
-  const resources = dataset.resources || [];
-
-  // Chercher CIS_bdpm.txt et CIS_COMPO_bdpm.txt — matching exact par title puis par URL
-  // IMPORTANT : CIS_COMPO_bdpm.txt contient "CIS_bdpm" → le matching doit être précis
-  const logTitles = resources.map(r => (r.title || r.url || '').slice(0, 60)).join(' | ');
-  console.log('[BDPM] Ressources disponibles: ' + logTitles.slice(0, 400));
-
-  const findResource = (titleExact, urlKeyword, excludeKeyword) => {
-    // 1. Match exact sur le titre (insensible à la casse)
-    let found = resources.find(r =>
-      (r.title || '').toLowerCase() === titleExact.toLowerCase()
-    );
-    if (found) return found.url;
-    // 2. URL contient le mot-clé mais PAS le mot exclu
-    found = resources.find(r => {
-      const u = (r.url   || '').toLowerCase();
-      const t = (r.title || '').toLowerCase();
-      const match   = u.includes(urlKeyword.toLowerCase()) || t.includes(urlKeyword.toLowerCase());
-      const exclude = excludeKeyword && (u.includes(excludeKeyword.toLowerCase()) || t.includes(excludeKeyword.toLowerCase()));
-      return match && !exclude;
-    });
-    return found ? found.url : null;
-  };
-
-  // CIS_bdpm.txt : exclure tout ce qui contient "compo"
-  const cisBdpmUrl  = findResource('CIS_bdpm.txt',       'CIS_bdpm',  'compo');
-  // CIS_COMPO_bdpm.txt : doit contenir "compo"
-  const cisCompoUrl = findResource('CIS_COMPO_bdpm.txt', 'CIS_COMPO', null);
-
-  if (!cisBdpmUrl || !cisCompoUrl) {
-    console.warn('[BDPM] cisBdpmUrl=' + cisBdpmUrl + ' cisCompoUrl=' + cisCompoUrl);
-    throw new Error('URLs CIS_bdpm ou CIS_COMPO introuvables dans data.gouv.fr (ressources: ' + resources.length + ')');
-  }
-
-  console.log('[BDPM] CIS_bdpm: '  + cisBdpmUrl.slice(0, 80));
-  console.log('[BDPM] CIS_COMPO: ' + cisCompoUrl.slice(0, 80));
-
-  // 2. Télécharger les deux CSV en parallèle (timeout 25s chacun)
+  // Télécharger CIS_bdpm.txt et CIS_COMPO_bdpm.txt en parallèle
   const [cisBuf, compoBuf] = await Promise.all([
-    httpGet(cisBdpmUrl,  25000),
-    httpGet(cisCompoUrl, 25000)
+    downloadFirstWorking(BDPM_CIS_CANDIDATES,   'CIS_bdpm',  22000),
+    downloadFirstWorking(BDPM_COMPO_CANDIDATES, 'CIS_COMPO', 22000)
   ]);
 
   console.log('[BDPM] Tailles brutes: CIS=' + cisBuf.length + ', COMPO=' + compoBuf.length);
