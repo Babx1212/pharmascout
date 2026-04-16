@@ -1,5 +1,5 @@
 /**
- * PharmaScout — Netlify Function : EU Products v16
+ * PharmaScout — Netlify Function : EU Products v17
  *
  * FR → BDPM REST API interne (/api/produit/by-substance-active)
  *       Découverte par reverse-engineering du bundle JS de la SPA BDPM (avril 2026)
@@ -281,8 +281,30 @@ async function fetchFrance(substance) {
   console.log('[BDPM] ' + data.recordsTotal + ' produits pour: ' + substance);
 
   // StatutBdm : 1 = Commercialisé, 0 = Non commercialisé / retiré
-  // SpecGeneDenom : DCI combinée ex. "LIDOCAINE/PRILOCAINE", "NOMEGESTROL ACETATE/ESTRADIOL"
-  //   → stockée dans _substances pour le filtrage combo A/B
+  // SpecGeneDenom = nom du médicament référent (lien générique→marque), PAS les DCI.
+  // Pour les DCI on utilise SpecDenom01 des génériques (ex. "NOMEGESTROL ACETATE/ESTRADIOL VIATRIS")
+  // et on cross-enrichit les médicaments de référence via SpecGeneId → SpecId.
+  //
+  // Ex : ZOELY (SpecId=61335127) ← NOMEGESTROL ACETATE/ESTRADIOL VIATRIS (SpecGeneId=61335127)
+  //   → on extrait "nomegestrol" + "estradiol" du nom du générique et on les associe à ZOELY
+
+  // Étape 1 : construire la map SpecId_de_référence → [dci1, dci2, ...]
+  const refSubsMap = new Map(); // SpecId (brand) → tableau de termes DCI
+  for (const item of data.data) {
+    if (!item.SpecGeneId || !item.SpecDenom01 || !item.SpecDenom01.includes('/')) continue;
+    const parts = item.SpecDenom01.split('/');
+    const subs  = parts.map(part => {
+      // Premier mot du fragment avant le premier chiffre ou virgule → terme DCI
+      const w0 = part.trim().split(/\s+/)[0] || '';
+      return /^\d|,/.test(w0) ? '' : w0.toLowerCase();
+    }).filter(s => s.length > 2);
+    if (subs.length > 0) {
+      if (!refSubsMap.has(item.SpecGeneId)) refSubsMap.set(item.SpecGeneId, []);
+      subs.forEach(s => { if (!refSubsMap.get(item.SpecGeneId).includes(s)) refSubsMap.get(item.SpecGeneId).push(s); });
+    }
+  }
+
+  // Étape 2 : construire chaque produit avec ses _substances
   return data.data
     .filter(item => item.SpecDenom01)
     .map(item => {
@@ -291,13 +313,19 @@ async function fetchFrance(substance) {
         holder: '',
         status: item.StatutBdm === 1 ? 'Commercialisé' : 'Non commercialisé'
       };
-      if (item.SpecGeneDenom) {
-        const subs = item.SpecGeneDenom
-          .split(/[/+,;]/)
-          .map(s => s.trim().toLowerCase())
-          .filter(s => s.length > 1);
-        if (subs.length > 0) obj._substances = subs;
+      let subs = [];
+      // Génériques combo : extraire DCI du nom lui-même
+      if (item.SpecDenom01.includes('/')) {
+        const parts = item.SpecDenom01.split('/');
+        subs = parts.map(part => {
+          const w0 = part.trim().split(/\s+/)[0] || '';
+          return /^\d|,/.test(w0) ? '' : w0.toLowerCase();
+        }).filter(s => s.length > 2);
       }
+      // Médicaments de référence : DCI inférées depuis leurs génériques combo
+      const fromRef = refSubsMap.get(item.SpecId) || [];
+      subs = [...new Set([...subs, ...fromRef])];
+      if (subs.length > 0) obj._substances = subs;
       return obj;
     });
 }
@@ -681,7 +709,24 @@ async function fetchSpain(substance) {
   }
 
   const toTitle = s => s.replace(/\b\w/g, c => c.toUpperCase());
-  const variants = [...new Set([substance.toLowerCase(), toTitle(substance), substance.toUpperCase()])];
+  // Variantes ES : lowercase, Titlecase, UPPERCASE + adaptation DCI espagnole
+  // CIMA utilise les DCI espagnoles accentuées (ex. prilocaína, lidocaína, betametasona)
+  // Adaptation courante : fin anglaise -aine/-ine → finale espagnole -aína/-ina
+  const toEsVariant = s => {
+    const low = s.toLowerCase();
+    if (/aine$/.test(low)) return low.replace(/aine$/, 'aína');
+    if (/ine$/.test(low) && !/medicine$|fluorine$/.test(low)) return low.replace(/ine$/, 'ina');
+    if (/one$/.test(low)) return low.replace(/one$/, 'ona');
+    if (/ide$/.test(low)) return low.replace(/ide$/, 'ido');
+    return '';
+  };
+  const esVariant = toEsVariant(substance);
+  const variants = [...new Set([
+    substance.toLowerCase(),
+    toTitle(substance),
+    substance.toUpperCase(),
+    ...(esVariant ? [esVariant, toTitle(esVariant)] : [])
+  ])];
   let gotAnyOk = false;
 
   for (const v of variants) {
@@ -689,17 +734,20 @@ async function fetchSpain(substance) {
       const url = 'https://cima.aemps.es/cima/rest/medicamentos?practiv1=' + encodeURIComponent(v) + '&pageSize=30&pageNumber=1';
       const data = await httpGetJson(url, 7000);
       gotAnyOk = true;
-      // pactiv1/2/3 : DCI des substances actives → stockées dans _substances pour filtrage combo
+      // vtm.nombre : DCI combinée ex. "lidocaína + prilocaína" → _substances pour filtrage combo
       const list = (data.resultados || []).map(p => {
         const obj = {
           name:   p.nombre     || '',
           holder: p.labtitular || '',
-          status: p.estado?.nombre || 'Autorizado'
+          status: p.estado?.nombre || (p.comerc ? 'Autorizado' : 'No comercializado')
         };
-        const subs = [p.pactiv1, p.pactiv2, p.pactiv3]
-          .filter(Boolean)
-          .map(s => s.toLowerCase().trim());
-        if (subs.length > 0) obj._substances = subs;
+        if (p.vtm && p.vtm.nombre) {
+          const subs = p.vtm.nombre
+            .split(/[+/,;]/)
+            .map(s => s.trim().toLowerCase())
+            .filter(s => s.length > 1);
+          if (subs.length > 0) obj._substances = subs;
+        }
         return obj;
       }).filter(p => p.name);
       if (list.length > 0) {
@@ -735,21 +783,36 @@ function parseCombo(raw) {
   return { primary: parts[0], filters };
 }
 
+// Normalise les accents pour comparaison cross-langue (lidocaína → lidocaina)
+function stripAccents(s) {
+  return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+// Match souple : préfixe bidirectionnel + tolérance suffixe linguistique (-aine/-aína, -one/-ona…)
+// Betamethason ↔ betamethasone ✅   lidocaine ↔ lidocaína ✅   nomegestrol ↔ nomegestrol ✅
+function substMatch(fl, t) {
+  const nfl = stripAccents(fl);
+  const nt  = stripAccents(t);
+  if (nfl.startsWith(nt) || nt.startsWith(nfl)) return true;
+  // Même radical avec terminaison différente (ex: lidocain-e vs lidocain-a)
+  const minLen = Math.min(nfl.length, nt.length);
+  if (minLen >= 6 && nfl.slice(0, minLen - 1) === nt.slice(0, minLen - 1)) return true;
+  return false;
+}
+
 function applyComboFilter(products, filters) {
   if (!filters || filters.length === 0) return products;
   return products.filter(p => {
     const nameLow  = (p.name || '').toLowerCase();
-    // _substances : tableau de DCI (ex. Belgique "Betamethason" au lieu de "Betamethasone")
+    // _substances : tableau de DCI (BE=néerlandais, ES=espagnol, FR/PT=local)
     const subsLow  = (p._substances || []).map(s => s.toLowerCase());
-    // Matching souple : on tokenise le haystack (nom + DCI) et on vérifie
-    // qu'au moins un token est un préfixe du filtre OU vice-versa.
-    // "betamethasone" (filtre) ↔ "betamethason" (DCI néerlandais) → match ✅
+    // Tokeniser nom + DCI pour le matching
     const tokens = (nameLow + ' ' + subsLow.join(' '))
       .split(/[\s,/\-()[\]]+/)
       .filter(t => t.length > 3);
     return filters.every(f => {
       const fl = f.toLowerCase();
-      return tokens.some(t => fl.startsWith(t) || t.startsWith(fl));
+      return tokens.some(t => substMatch(fl, t));
     });
   });
 }
