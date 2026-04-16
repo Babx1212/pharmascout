@@ -2521,8 +2521,8 @@ function injectEmaFlagsIntoSafety(d) {
     `);
   }
 
-  // DHPCs
-  if (d.hasDhpc && d.dhpcs && d.dhpcs.length > 0) {
+  // DHPCs (d.hasDhpc n'existe pas dans la réponse backend — utiliser d.dhpcs directement)
+  if (d.dhpcs && d.dhpcs.length > 0) {
     const dhpc = d.dhpcs[0];
     fragments.push(`
       <div class="flag-item flag-warning ema-flag-injected">
@@ -2570,22 +2570,30 @@ async function fetchSwissmedic(substance) {
 }
 
 function injectSwissFlagsIntoSafety(d) {
-  const _rSs=document.getElementById('reg-swiss-status'); // may be null
+  const _rSs=document.getElementById('reg-swiss-status'); // may be null (element removed from HTML)
   const _rSd=document.getElementById('reg-swiss-detail'); // may be null
   const _mSP=document.getElementById('m-swiss-pv-safety');
+  // Mettre à jour le KPI "Vigilance CH" dans l'onglet Sécurité indépendamment de _rSs
+  if (_mSP) {
+    if (d.pvAlert) {
+      _mSP.textContent = '🟡 Oui'; _mSP.style.color = '#f59e0b';
+    } else if ((d.meta && d.meta.totalMono > 0) || d.totalCHProducts > 0) {
+      _mSP.textContent = '🟢 Autorisé'; _mSP.style.color = '#10b981';
+    } else {
+      _mSP.textContent = '--'; _mSP.style.color = 'var(--text-muted)';
+    }
+  }
+  // Mettre à jour reg-swiss-status / reg-swiss-detail si présents (éléments optionnels)
   if (_rSs) {
     if (d.pvAlert) {
-      if(_rSs){_rSs.textContent='🟡 Vigilance News';_rSs.style.color='#f59e0b';}
-      if(_rSd){_rSd.textContent='Mentionné dans Vigilance News';}
-      if(_mSP){_mSP.textContent='🟡 Oui';_mSP.style.color='#f59e0b';}
-    } else if (d.totalCHProducts > 0) {
-      if(_rSs){_rSs.textContent='🟢 Autorisé CH';_rSs.style.color='#10b981';}
-      if(_rSd){_rSd.textContent=d.totalCHProducts+' produit(s) Swissmedic';}
-      if(_mSP){_mSP.textContent='🟢 Autorisé';_mSP.style.color='#10b981';}
+      _rSs.textContent='🟡 Vigilance News'; _rSs.style.color='#f59e0b';
+      if(_rSd) _rSd.textContent='Mentionné dans Vigilance News';
+    } else if ((d.meta && d.meta.totalMono > 0) || d.totalCHProducts > 0) {
+      _rSs.textContent='🟢 Autorisé CH'; _rSs.style.color='#10b981';
+      if(_rSd) _rSd.textContent=((d.meta&&d.meta.totalMono)||d.totalCHProducts||0)+' produit(s) Swissmedic';
     } else {
-      if(_rSs){_rSs.textContent='⚪ Absent du marché CH';_rSs.style.color='var(--text-muted)';}
-      if(_rSd){_rSd.textContent='';}
-      if(_mSP){_mSP.textContent='--';_mSP.style.color='var(--text-muted)';}
+      _rSs.textContent='⚪ Absent du marché CH'; _rSs.style.color='var(--text-muted)';
+      if(_rSd) _rSd.textContent='';
     }
   }
   const _fc=document.getElementById('flags-container');
