@@ -1300,7 +1300,14 @@ async function fetchEUProducts(substance) {
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const d = await r.json();
       const countryData = (d.countries || [])[0] || d;
-      return { products: countryData.products || [], total: countryData.total || 0 };
+      // Passer TOUS les champs : products, total, note, link, error (nécessaires au rendu BE/PT/FR)
+      return {
+        products: countryData.products || [],
+        total:    countryData.total    || 0,
+        note:     countryData.note     || null,
+        link:     countryData.link     || null,
+        error:    countryData.error    || null
+      };
     }
 
     // First pass: all countries in parallel
