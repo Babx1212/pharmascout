@@ -109,22 +109,35 @@ async function loadBdpmMaps() {
   const dataset = await httpGetJson(DATAGOUV_DATASET_API, 12000);
   const resources = dataset.resources || [];
 
-  // Chercher CIS_bdpm.txt et CIS_COMPO_bdpm.txt
-  const findUrl = (pattern) => {
-    // Chercher d'abord dans les ressources communautaires si vide
-    const found = resources.find(r =>
-      (r.url || '').toLowerCase().includes(pattern.toLowerCase()) ||
-      (r.title || '').toLowerCase().includes(pattern.toLowerCase())
+  // Chercher CIS_bdpm.txt et CIS_COMPO_bdpm.txt — matching exact par title puis par URL
+  // IMPORTANT : CIS_COMPO_bdpm.txt contient "CIS_bdpm" → le matching doit être précis
+  const logTitles = resources.map(r => (r.title || r.url || '').slice(0, 60)).join(' | ');
+  console.log('[BDPM] Ressources disponibles: ' + logTitles.slice(0, 400));
+
+  const findResource = (titleExact, urlKeyword, excludeKeyword) => {
+    // 1. Match exact sur le titre (insensible à la casse)
+    let found = resources.find(r =>
+      (r.title || '').toLowerCase() === titleExact.toLowerCase()
     );
+    if (found) return found.url;
+    // 2. URL contient le mot-clé mais PAS le mot exclu
+    found = resources.find(r => {
+      const u = (r.url   || '').toLowerCase();
+      const t = (r.title || '').toLowerCase();
+      const match   = u.includes(urlKeyword.toLowerCase()) || t.includes(urlKeyword.toLowerCase());
+      const exclude = excludeKeyword && (u.includes(excludeKeyword.toLowerCase()) || t.includes(excludeKeyword.toLowerCase()));
+      return match && !exclude;
+    });
     return found ? found.url : null;
   };
 
-  const cisBdpmUrl   = findUrl('CIS_bdpm')   || findUrl('cis_bdpm');
-  const cisCompoUrl  = findUrl('CIS_COMPO')  || findUrl('cis_compo') || findUrl('compo');
+  // CIS_bdpm.txt : exclure tout ce qui contient "compo"
+  const cisBdpmUrl  = findResource('CIS_bdpm.txt',       'CIS_bdpm',  'compo');
+  // CIS_COMPO_bdpm.txt : doit contenir "compo"
+  const cisCompoUrl = findResource('CIS_COMPO_bdpm.txt', 'CIS_COMPO', null);
 
   if (!cisBdpmUrl || !cisCompoUrl) {
-    // Tentative de secours : lister toutes les ressources pour debug
-    console.warn('[BDPM] Ressources trouvées: ' + resources.map(r => r.title + '|' + r.url).join(', ').slice(0, 400));
+    console.warn('[BDPM] cisBdpmUrl=' + cisBdpmUrl + ' cisCompoUrl=' + cisCompoUrl);
     throw new Error('URLs CIS_bdpm ou CIS_COMPO introuvables dans data.gouv.fr (ressources: ' + resources.length + ')');
   }
 
