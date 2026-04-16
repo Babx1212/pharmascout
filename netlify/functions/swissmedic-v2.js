@@ -96,6 +96,7 @@ exports.handler = async (event) => {
         totalCHProducts: mono.length + combinations.length,
         pvAlert: pvResult.pvAlert,
         pvDetails: pvResult.pvDetails,
+        pvConfidence: pvResult.pvConfidence || 'indicative',
         searchUrl: `https://www.swissmedic.ch/swissmedic/en/home/services/listen_neu.html`
       })
     };
@@ -349,33 +350,52 @@ function identifyReference(mono) {
 
 /**
  * Vérification pharmacovigilance Swissmedic.
- * Scrape deux pages :
- *  1. Index global de toutes les éditions Vigilance News (couverture historique large)
- *  2. Page de résumé de l'édition courante (fallback/confirmation)
- * Utilise les stems pharmaceutiques pour le matching (cohérence avec l'Excel).
+ * Scrape deux pages Vigilance News. Le match est contextuel :
+ * la substance doit apparaître dans le CONTENU principal de la page
+ * (titres, paragraphes), pas seulement dans les URLs ou menus de navigation.
+ *
+ * pvAlert = true si mention identifiée dans le contenu éditorial.
+ * pvConfidence = 'indicative' (match de substring dans page HTML,
+ *   pas une confirmation pharmacovigilance formelle).
  */
 async function checkPharmacovigilance(substance) {
   let pvAlert = false;
   let pvDetails = null;
+  const pvConfidence = 'indicative';
 
-  // Pages à scraper — du plus large au plus récent
   const pvPages = [
-    // Index de toutes les éditions (page qui liste TOUS les Vigilance News et leurs sujets)
     'https://www.swissmedic.ch/swissmedic/en/home/humanarzneimittel/market-surveillance/pharmacovigilance/vigilance-news/vigilance-news.html',
-    // Page d'actualités récentes (fallback)
     'https://www.swissmedic.ch/swissmedic/en/home/humanarzneimittel/market-surveillance/pharmacovigilance/vigilance-news.html'
   ];
 
   const stems = buildSearchStems(substance);
+  // Exiger au moins 6 caractères pour éviter les faux positifs sur les stems courts
+  const validStems = stems.filter(s => s.length >= 6);
+  if (validStems.length === 0) return { pvAlert: false, pvDetails: null, pvConfidence };
 
   for (const pvUrl of pvPages) {
     try {
       const pvHtml = await fetchText(pvUrl, 8000);
-      const htmlLower = pvHtml.toLowerCase();
+
+      // Extraire uniquement le contenu éditorial (balises <p>, <h2>, <h3>, <li>, <td>)
+      // Exclure les URLs href, attributs HTML et balises de navigation
+      const contentBlocks = [];
+      const blockPattern = /<(?:p|h[1-6]|li|td|th|div|span)[^>]*>([^<]{10,})<\/(?:p|h[1-6]|li|td|th|div|span)>/gi;
+      let m;
+      while ((m = blockPattern.exec(pvHtml)) !== null) {
+        contentBlocks.push(m[1].toLowerCase());
+      }
+      const editorialContent = contentBlocks.join(' ');
+
+      // Si l'extraction a échoué (page vide ou format différent), fallback sur le texte brut
+      // mais en supprimant d'abord les balises HTML et les URLs
+      const textContent = editorialContent.length > 200
+        ? editorialContent
+        : pvHtml.replace(/<[^>]+>/g, ' ').replace(/https?:\/\/\S+/g, ' ').toLowerCase();
 
       let matchedStem = null;
-      for (const stem of stems) {
-        if (stem.length >= 5 && htmlLower.includes(stem)) {
+      for (const stem of validStems) {
+        if (textContent.includes(stem)) {
           matchedStem = stem;
           break;
         }
@@ -383,10 +403,10 @@ async function checkPharmacovigilance(substance) {
 
       if (matchedStem) {
         pvAlert = true;
-        // Chercher un lien dans le contexte du terme trouvé
+        // Chercher un lien contextuel dans le HTML brut
         const escaped = matchedStem.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         const linkPattern = new RegExp(
-          `<a[^>]+href="([^"]+)"[^>]*>[^<]{0,80}${escaped}[^<]{0,80}<\\/a>`, 'i'
+          `<a[^>]+href="([^"#][^"]*)"[^>]*>[^<]{0,100}${escaped}[^<]{0,100}<\\/a>`, 'i'
         );
         const linkMatch = pvHtml.match(linkPattern);
         if (linkMatch) {
@@ -394,15 +414,14 @@ async function checkPharmacovigilance(substance) {
             ? linkMatch[1]
             : 'https://www.swissmedic.ch' + linkMatch[1];
         } else {
-          // Pas de lien direct → pointer vers la page d'index
           pvDetails = pvUrl;
         }
-        break; // match trouvé, pas besoin de continuer
+        break;
       }
-    } catch (_) { /* chaque page est non bloquante */ }
+    } catch (_) { /* non bloquant */ }
   }
 
-  return { pvAlert, pvDetails };
+  return { pvAlert, pvDetails, pvConfidence };
 }
 
 // ──────────────────────────────────────────────────
