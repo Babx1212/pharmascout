@@ -1354,13 +1354,22 @@ function renderEUProducts(results) {
       <div class="collapse show" id="${collapseId}">`;
 
     if (data.error && items.length === 0) {
+      const linkPart = data.link ? ` <a href="${data.link}" target="_blank" style="color:var(--accent)">Consulter ${meta.source}</a>` : '';
       html += `<div class="flag-item flag-secondary" style="margin:0 0 4px">
         <i class="bi bi-info-circle"></i>
-        <span style="font-size:0.78rem;color:var(--text-muted)">${data.error.includes('timeout') ? 'Délai dépassé - données temporairement indisponibles' : 'Source indisponible : ' + data.error}</span>
+        <span style="font-size:0.78rem;color:var(--text-muted)">${data.error.includes('timeout') ? 'Délai dépassé - données temporairement indisponibles' : 'Source indisponible : ' + data.error}${linkPart}</span>
+      </div>`;
+    } else if (data.note && items.length === 0) {
+      // Pas d'API publique — afficher lien direct vers la base nationale
+      const linkPart = data.link
+        ? `<a href="${data.link}" target="_blank" style="color:var(--accent);margin-left:4px">Consulter ${meta.source} directement →</a>`
+        : '';
+      html += `<div style="padding:8px 12px;font-size:0.78rem;color:var(--text-muted)">
+        Pas d'API publique disponible pour ce pays.${linkPart}
       </div>`;
     } else if (items.length === 0) {
       html += `<div style="padding:8px 12px;font-size:0.78rem;color:var(--text-muted)">
-        Aucun produit identifié sur ce marché.
+        Aucun produit identifié sur ce marché pour cette substance.
       </div>`;
     } else {
       html += `<table class="data-table" style="margin-bottom:0"><thead><tr><th>Médicament</th><th>Titulaire</th><th>Statut</th></tr></thead><tbody>`;
@@ -2409,7 +2418,8 @@ function injectEmaFlagsIntoSafety(d) {
   const container = document.getElementById('flags-container');
   if (!container) return;
 
-  // Supprimer les anciens flags EMA s'il y en a  container.querySelectorAll('.ema-flag-injected').forEach(el => el.remove());
+  // Supprimer les anciens flags EMA (évite les doublons entre analyses)
+  container.querySelectorAll('.ema-flag-injected').forEach(el => el.remove());
 
   const fragments = [];
 
@@ -2482,20 +2492,22 @@ function injectEmaFlagsIntoSafety(d) {
   const _rEs=document.getElementById('reg-ema-status');
   const _rEd=document.getElementById('reg-ema-detail');
   const _mEP=document.getElementById('m-ema-prac-safety');
+  // Utiliser d.pvSignal (calculé backend) comme source de vérité — fallback sur les champs individuels
+  const _sig = d.pvSignal || (d.pracActive && d.isSafetyReferral ? 'safety' : d.pracActive ? 'prac' : psusas.length > 0 ? 'psusa' : d.hasDhpc ? 'dhpc' : 'none');
   if (_rEs) {
-    if (d.pracActive && d.isSafetyReferral) {
+    if (_sig === 'safety') {
       if(_rEs){_rEs.textContent='🔴 Signal PRAC';_rEs.style.color='#ef4444';}
       _rEd.textContent=d.pracDetails?d.pracDetails.slice(0,60):'Referral sécurité actif';
       if(_mEP){_mEP.textContent='🔴 Safety';_mEP.style.color='#ef4444';}
-    } else if (d.pracActive) {
+    } else if (_sig === 'prac') {
       if(_rEs){_rEs.textContent='🟡 Procédure EMA';_rEs.style.color='#f59e0b';}
       _rEd.textContent=d.pracDetails?d.pracDetails.slice(0,60):'';
       if(_mEP){_mEP.textContent='🟡 PRAC';_mEP.style.color='#f59e0b';}
-    } else if (psusas.length > 0) {
+    } else if (_sig === 'psusa') {
       if(_rEs){_rEs.textContent='🟡 PSUSA';_rEs.style.color='#f59e0b';}
-      _rEd.textContent=psusas[0].outcome ? psusas[0].outcome.slice(0,60) : 'Bilan périodique de sécurité';
+      _rEd.textContent=psusas[0]?.outcome ? psusas[0].outcome.slice(0,60) : 'Bilan périodique de sécurité (' + psusas.length + ')';
       if(_mEP){_mEP.textContent='🟡 PSUSA';_mEP.style.color='#f59e0b';}
-    } else if (d.hasDhpc) {
+    } else if (_sig === 'dhpc') {
       if(_rEs){_rEs.textContent='🟡 DHPC';_rEs.style.color='#f59e0b';}
       _rEd.textContent='Communication sécurité professionnels';
       if(_mEP){_mEP.textContent='🟡 DHPC';_mEP.style.color='#f59e0b';}
