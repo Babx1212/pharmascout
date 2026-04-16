@@ -870,35 +870,35 @@
           </div>
           <div id="ema-content" style="display:none">
             <div class="row g-2 mb-3">
-            <div class="col-3">
-              <div class="metric-box">
-                <div class="metric-value sm" id="m-ema-prac">-</div>
-                <div class="metric-label">Signal PRAC</div>
-                <div class="metric-sub">Procédure sécurité EU</div>
+              <div class="col-3">
+                <div class="metric-box">
+                  <div class="metric-value sm" id="m-ema-prac">-</div>
+                  <div class="metric-label">Signal PRAC</div>
+                  <div class="metric-sub">Procédure sécurité EU</div>
+                </div>
+              </div>
+              <div class="col-3">
+                <div class="metric-box">
+                  <div class="metric-value" id="m-ema-referrals">-</div>
+                  <div class="metric-label">Referrals</div>
+                  <div class="metric-sub">Art. 30/31/107i</div>
+                </div>
+              </div>
+              <div class="col-3">
+                <div class="metric-box">
+                  <div class="metric-value" id="m-ema-psusa">-</div>
+                  <div class="metric-label">PSUSAs</div>
+                  <div class="metric-sub">Bilans périodiques</div>
+                </div>
+              </div>
+              <div class="col-3">
+                <div class="metric-box">
+                  <div class="metric-value" id="m-ema-dhpc">-</div>
+                  <div class="metric-label">DHPCs</div>
+                  <div class="metric-sub">Comm. sécurité</div>
+                </div>
               </div>
             </div>
-            <div class="col-3">
-              <div class="metric-box">
-                <div class="metric-value" id="m-ema-referrals">-</div>
-                <div class="metric-label">Referrals</div>
-                <div class="metric-sub">Art. 30/31/107i</div>
-              </div>
-            </div>
-            <div class="col-3">
-              <div class="metric-box">
-                <div class="metric-value" id="m-ema-psusa">-</div>
-                <div class="metric-label">PSUSAs</div>
-                <div class="metric-sub">Bilans périodiques</div>
-              </div>
-            </div>
-            <div class="col-3">
-              <div class="metric-box">
-                <div class="metric-value" id="m-ema-dhpc">-</div>
-                <div class="metric-label">DHPCs</div>
-                <div class="metric-sub">Comm. sécurité</div>
-              </div>
-            </div>
-          </div>
 
             <div id="ema-prac-alert" style="display:none" class="flag-item flag-danger mb-2">
               <i class="bi bi-exclamation-circle-fill"></i>
@@ -1628,27 +1628,18 @@ async function fetchFAERS(substance) {
   const result = { totalReports: 0, seriousReports: 0, deathReports: 0, topReactions: [] };
 
   try {
-    // Total
-    const r1 = await fetch(`${base}?search=${encodeURIComponent(search)}&limit=1`);
-    if (r1.ok) { const d = await r1.json(); result.totalReports = d.meta?.results?.total || 0; }
+    // Lancer les 4 requêtes en parallèle avec timeout 12s chacune
+    const [r1, r2, r3, r4] = await Promise.allSettled([
+      fetchWithTimeout(`${base}?search=${encodeURIComponent(search)}&limit=1`),
+      fetchWithTimeout(`${base}?search=${encodeURIComponent(search + ' AND serious:1')}&limit=1`),
+      fetchWithTimeout(`${base}?search=${encodeURIComponent(search + ' AND seriousnessdeath:1')}&limit=1`),
+      fetchWithTimeout(`${base}?search=${encodeURIComponent(search)}&count=patient.reaction.reactionmeddrapt.exact&limit=10`)
+    ]);
 
-    await sleep(350);
-
-    // Serious
-    const r2 = await fetch(`${base}?search=${encodeURIComponent(search + ' AND serious:1')}&limit=1`);
-    if (r2.ok) { const d = await r2.json(); result.seriousReports = d.meta?.results?.total || 0; }
-
-    await sleep(350);
-
-    // Deaths
-    const r3 = await fetch(`${base}?search=${encodeURIComponent(search + ' AND seriousnessdeath:1')}&limit=1`);
-    if (r3.ok) { const d = await r3.json(); result.deathReports = d.meta?.results?.total || 0; }
-
-    await sleep(350);
-
-    // Top reactions
-    const r4 = await fetch(`${base}?search=${encodeURIComponent(search)}&count=patient.reaction.reactionmeddrapt.exact&limit=10`);
-    if (r4.ok) { const d = await r4.json(); result.topReactions = d.results?.slice(0, 10) || []; }
+    if (r1.status === 'fulfilled' && r1.value.ok) { const d = await r1.value.json(); result.totalReports = d.meta?.results?.total || 0; }
+    if (r2.status === 'fulfilled' && r2.value.ok) { const d = await r2.value.json(); result.seriousReports = d.meta?.results?.total || 0; }
+    if (r3.status === 'fulfilled' && r3.value.ok) { const d = await r3.value.json(); result.deathReports = d.meta?.results?.total || 0; }
+    if (r4.status === 'fulfilled' && r4.value.ok) { const d = await r4.value.json(); result.topReactions = d.results?.slice(0, 10) || []; }
 
   } catch(e) { console.warn('FAERS error:', e); }
 
@@ -1659,7 +1650,7 @@ async function fetchGenerics(substance) {
   const result = {
 totalApprovals: 0, genericApprovals: 0, ndaApprovals: 0, manufacturers: [], originators: [] };
   try {
-    const r = await fetch(`https://api.fda.gov/drug/drugsfda.json?search=${encodeURIComponent(`openfda.generic_name:"${substance}"`)}&limit=100`);
+    const r = await fetchWithTimeout(`https://api.fda.gov/drug/drugsfda.json?search=${encodeURIComponent(`openfda.generic_name:"${substance}"`)}&limit=100`);
     if (r.ok) {
       const d = await r.json();
       result.totalApprovals = d.meta?.results?.total || 0;
@@ -1692,28 +1683,32 @@ totalApprovals: 0, genericApprovals: 0, ndaApprovals: 0, manufacturers: [], orig
 
 async function fetchPubMed(substance) {
   const base = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi';
+  const safeTerm = `${substance} AND (safety OR adverse OR side effect OR toxicity OR risk)`;
   const result = { totalPublications: 0, safetyPublications: 0, recentSafetyPublications: 0 };
   try {
-    const r1 = await fetch(`${base}?db=pubmed&term=${encodeURIComponent(substance)}&retmax=0&retmode=json`);
-    if (r1.ok) { const d = await r1.json(); result.totalPublications = parseInt(d.esearchresult?.count || 0); }
+    // Lancer les 3 requêtes en parallèle avec timeout 12s chacune
+    const [r1, r2, r3] = await Promise.allSettled([
+      fetchWithTimeout(`${base}?db=pubmed&term=${encodeURIComponent(substance)}&retmax=0&retmode=json`),
+      fetchWithTimeout(`${base}?db=pubmed&term=${encodeURIComponent(safeTerm)}&retmax=0&retmode=json`),
+      fetchWithTimeout(`${base}?db=pubmed&term=${encodeURIComponent(safeTerm)}&datetype=pdat&mindate=2023&maxdate=2026&retmax=0&retmode=json`)
+    ]);
 
-    await sleep(300);
-
-    const safeTerm = `${substance} AND (safety OR adverse OR side effect OR toxicity OR risk)`;
-    const r2 = await fetch(`${base}?db=pubmed&term
-=${encodeURIComponent(safeTerm)}&retmax=0&retmode=json`);
-    if (r2.ok) { const d = await r2.json(); result.safetyPublications = parseInt(d.esearchresult?.count || 0); }
-
-    await sleep(300);
-
-    const r3 = await fetch(`${base}?db=pubmed&term=${encodeURIComponent(safeTerm)}&datetype=pdat&mindate=2023&maxdate=2026&retmax=0&retmode=json`);
-    if (r3.ok) { const d = await r3.json(); result.recentSafetyPublications = parseInt(d.esearchresult?.count || 0); }
+    if (r1.status === 'fulfilled' && r1.value.ok) { const d = await r1.value.json(); result.totalPublications = parseInt(d.esearchresult?.count || 0); }
+    if (r2.status === 'fulfilled' && r2.value.ok) { const d = await r2.value.json(); result.safetyPublications = parseInt(d.esearchresult?.count || 0); }
+    if (r3.status === 'fulfilled' && r3.value.ok) { const d = await r3.value.json(); result.recentSafetyPublications = parseInt(d.esearchresult?.count || 0); }
 
   } catch(e) { console.warn('PubMed error:', e); }
   return result;
 }
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// Helper: fetch avec timeout via AbortController (évite les gels indéfinis)
+function fetchWithTimeout(url, timeoutMs = 12000) {
+  const ctrl = new AbortController();
+  const tid = setTimeout(() => ctrl.abort(), timeoutMs);
+  return fetch(url, { signal: ctrl.signal }).finally(() => clearTimeout(tid));
+}
 
 // --------------------------------------------------------------------------------------------------------------------------
 // EXCEL PARSER (IQVIA)
@@ -2109,14 +2104,18 @@ async function analyze() {
   setResults(false);
 
   try {
-    setLoading(true, '📡 FDA FAERS – effets indésirables...', 15);
-    state.faers = await fetchFAERS(substance);
+    setLoading(true, '📡 FDA FAERS · Orange Book · PubMed...', 20);
 
-    setLoading(true, '📡 FDA Orange Book – génériques approuvés...', 40);
-    state.generics = await fetchGenerics(substance);
+    // Lancer FDA FAERS, Orange Book et PubMed en parallèle
+    const [faersResult, genericsResult, pubmedResult] = await Promise.allSettled([
+      fetchFAERS(substance),
+      fetchGenerics(substance),
+      fetchPubMed(substance)
+    ]);
 
-    setLoading(true, '📡 PubMed – littérature scientifique...', 62);
-    state.pubmed = await fetchPubMed(substance);
+    state.faers    = faersResult.status    === 'fulfilled' ? faersResult.value    : { totalReports: 0, seriousReports: 0, deathReports: 0, topReactions: [] };
+    state.generics = genericsResult.status === 'fulfilled' ? genericsResult.value : { totalApprovals: 0, genericApprovals: 0, ndaApprovals: 0, manufacturers: [], originators: [] };
+    state.pubmed   = pubmedResult.status   === 'fulfilled' ? pubmedResult.value   : { totalPublications: 0, safetyPublications: 0, recentSafetyPublications: 0 };
 
     state.iqvia = null;
     if (iqviaFile) {
@@ -2285,33 +2284,53 @@ function renderEMA(d) {
   if (pracActive) {
     show('ema-prac-alert');
     hide('ema-no-prac');
+
     document.getElementById('ema-prac-alert-title').textContent =
       d.pracDetails || 'Procédure PRAC / signal de sécurité détecté';
+
     const parts = [];
     if (d.pracType)           parts.push(d.pracType);
     if (d.pracStatus)         parts.push('Statut : ' + d.pracStatus);
     if (d.pracRecommendation) parts.push('Recommandation : ' + d.pracRecommendation);
     if (d.pracDecisionDate)   parts.push('Décision CE : ' + d.pracDecisionDate);
     document.getElementById('ema-prac-alert-detail').textContent = parts.join(' - ');
+
     const mainRef = allReferrals[0];
     const metaEl  = document.getElementById('ema-prac-meta');
-    if (mainRef && mainRef.inn) { metaEl.textContent = 'Substances : ' + mainRef.inn; } else { metaEl.textContent = ''; }
-    if (d.pracUrl) { const linkEl = document.getElementById('ema-prac-link'); linkEl.href = d.pracUrl; show('ema-prac-alert-link'); } else { hide('ema-prac-alert-link'); }
+    if (mainRef && mainRef.inn) {
+      metaEl.textContent = 'Substances : ' + mainRef.inn;
+    } else {
+      metaEl.textContent = '';
+    }
+
+    if (d.pracUrl) {
+      const linkEl = document.getElementById('ema-prac-link');
+      linkEl.href = d.pracUrl;
+      show('ema-prac-alert-link');
+    } else {
+      hide('ema-prac-alert-link');
+    }
   } else if (!pracActive && !hasPsusas) {
-    hide('ema-prac-alert'); show('ema-no-prac');
+    hide('ema-prac-alert');
+    show('ema-no-prac');
   } else {
-    hide('ema-prac-alert'); hide('ema-no-prac');
+    // PSUSAs exist but no referrals → no red alert, no green "aucun"
+    hide('ema-prac-alert');
+    hide('ema-no-prac');
   }
 
-  // ---- Referrals ----
+  // ---- Liste de tous les referrals ----
   if (allReferrals.length > 0) {
     show('ema-all-referrals-section');
     document.getElementById('ema-all-referrals-list').innerHTML = allReferrals.map(r => `
       <div class="flag-item ${r.isSafety ? 'flag-danger' : 'flag-warning'}" style="margin-bottom:8px">
-        --
+        ${r.isSafety ? '--' : '--'}
         <div style="flex:1">
           <div class="flag-label" style="font-size:0.85rem">
-            ${r.url ? `<a href="${r.url}" target="_blank" style="color:inherit;text-decoration:underline">${r.name}</a>` : r.name}
+            ${r.url
+              ? `<a href="${r.url}" target="_blank" style="color:inherit;text-decoration:underline">${r.name}</a>`
+              : r.name
+}
           </div>
           <div class="flag-detail" style="font-size:0.78rem">
             ${[r.type, r.status, r.recommendation ? 'Recommandation : ' + r.recommendation : ''].filter(Boolean).join(' - ')}
@@ -2320,9 +2339,11 @@ function renderEMA(d) {
         </div>
       </div>
     `).join('');
-  } else { hide('ema-all-referrals-section'); }
+  } else {
+    hide('ema-all-referrals-section');
+  }
 
-  // ---- PSUSAs ----
+  // ---- PSUSAs (bilans périodiques de sécurité) ----
   if (hasPsusas) {
     show('ema-psusa-section');
     document.getElementById('ema-psusa-list').innerHTML = psusas.slice(0, 15).map(p => `
@@ -2330,7 +2351,9 @@ function renderEMA(d) {
         --
         <div style="flex:1">
           <div class="flag-label" style="font-size:0.85rem">
-            ${p.url ? `<a href="${p.url}" target="_blank" style="color:inherit;text-decoration:underline">${p.procedure || p.substance || 'PSUSA'}</a>` : (p.procedure || p.substance || 'PSUSA')}
+            ${p.url
+              ? `<a href="${p.url}" target="_blank" style="color:inherit;text-decoration:underline">${p.procedure || p.substance || 'PSUSA'}</a>`
+              : (p.procedure || p.substance || 'PSUSA')}
           </div>
           <div class="flag-detail" style="font-size:0.78rem">
             ${[p.outcome, p.updated ? 'Mis à jour : ' + p.updated : '', p.medicines ? 'Médicaments : ' + p.medicines.slice(0,80) : ''].filter(Boolean).join(' - ')}
@@ -2338,7 +2361,9 @@ function renderEMA(d) {
         </div>
       </div>
     `).join('');
-  } else { hide('ema-psusa-section'); }
+  } else {
+    hide('ema-psusa-section');
+  }
 
   // ---- DHPCs ----
   if (dhpcs.length > 0) {
@@ -2348,7 +2373,9 @@ function renderEMA(d) {
         --
         <div style="flex:1">
           <div class="flag-label" style="font-size:0.85rem">
-            ${dc.url ? `<a href="${dc.url}" target="_blank" style="color:inherit;text-decoration:underline">${dc.name || 'DHPC'}</a>` : (dc.name || 'DHPC')}
+            ${dc.url
+              ? `<a href="${dc.url}" target="_blank" style="color:inherit;text-decoration:underline">${dc.name || 'DHPC'}</a>`
+              : (dc.name || 'DHPC')}
           </div>
           <div class="flag-detail" style="font-size:0.78rem">
             ${[dc.date, dc.outcome, dc.type].filter(Boolean).join(' - ')}
@@ -2356,10 +2383,15 @@ function renderEMA(d) {
         </div>
       </div>
     `).join('');
-  } else { hide('ema-dhpc-section'); }
+  } else {
+    hide('ema-dhpc-section');
+  }
 
-  document.getElementById('ema-search-link').href = d.searchUrl || `https://www.ema.europa.eu/en/search?search_api_fulltext=${encodeURIComponent(d.substance)}`;
+  // ---- Lien de recherche EMA ----
+  document.getElementById('ema-search-link').href =
+    d.searchUrl || `https://www.ema.europa.eu/en/search?search_api_fulltext=${encodeURIComponent(d.substance)}`;
 
+  // ---- Injecter signal EMA dans l'onglet Sécurité ----    // Produits EMA
   if (d.products && d.products.length > 0) {
     show('ema-products-section');
     document.getElementById('ema-products-body').innerHTML = d.products.map(p =>
@@ -2376,12 +2408,17 @@ function renderEMA(d) {
 function injectEmaFlagsIntoSafety(d) {
   const container = document.getElementById('flags-container');
   if (!container) return;
-  container.querySelectorAll('.ema-flag-injected').forEach(el => el.remove());
+
+  // Supprimer les anciens flags EMA s'il y en a  container.querySelectorAll('.ema-flag-injected').forEach(el => el.remove());
+
   const fragments = [];
 
+  // Signal PRAC de sécurité
   if (d.pracActive && d.isSafetyReferral) {
+    const ref = (d.allReferrals || [])[0] || {};
     const urlPart = d.pracUrl
-      ? `<a href="${d.pracUrl}" target="_blank" style="color:#ef4444;margin-left:6px;font-size:0.78rem;font-weight:600">-- ema.europa.eu --</a>` : '';
+      ? `<a href="${d.pracUrl
+}" target="_blank" style="color:#ef4444;margin-left:6px;font-size:0.78rem;font-weight:600">-- ema.europa.eu --</a>`      : '';
     fragments.push(`
       <div class="flag-item flag-danger ema-flag-injected">
         ----- <div>
@@ -2392,7 +2429,8 @@ function injectEmaFlagsIntoSafety(d) {
             ${urlPart}
           </div>
         </div>
-      </div>`);
+      </div>
+    `);
   } else if (d.pracActive) {
     fragments.push(`
       <div class="flag-item flag-warning ema-flag-injected">
@@ -2402,9 +2440,11 @@ function injectEmaFlagsIntoSafety(d) {
             ${d.pracUrl ? `<a href="${d.pracUrl}" target="_blank" style="color:var(--accent);margin-left:6px;font-size:0.78rem">-- ema.europa.eu --</a>` : ''}
           </div>
         </div>
-      </div>`);
+      </div>
+    `);
   }
 
+  // PSUSAs
   const psusas = d.psusas || [];
   if (psusas.length > 0 && !d.pracActive) {
     const ps = psusas[0];
@@ -2416,9 +2456,11 @@ function injectEmaFlagsIntoSafety(d) {
             ${ps.url ? `<a href="${ps.url}" target="_blank" style="color:var(--accent);margin-left:6px;font-size:0.78rem">-- Voir --</a>` : ''}
           </div>
         </div>
-      </div>`);
+      </div>
+    `);
   }
 
+  // DHPCs
   if (d.hasDhpc && d.dhpcs && d.dhpcs.length > 0) {
     const dhpc = d.dhpcs[0];
     fragments.push(`
@@ -2429,10 +2471,13 @@ function injectEmaFlagsIntoSafety(d) {
             ${dhpc.url ? `<a href="${dhpc.url}" target="_blank" style="color:var(--accent);margin-left:6px;font-size:0.78rem">-- Voir --</a>` : ''}
           </div>
         </div>
-      </div>`);
+      </div>
+    `);
   }
 
-  if (fragments.length > 0) { container.insertAdjacentHTML('afterbegin', fragments.join('')); }
+  if (fragments.length > 0) {
+    container.insertAdjacentHTML('afterbegin', fragments.join(''));
+  }
 
   const _rEs=document.getElementById('reg-ema-status');
   const _rEd=document.getElementById('reg-ema-detail');
@@ -2461,7 +2506,7 @@ function injectEmaFlagsIntoSafety(d) {
   }
 }
 
-function fetchSwissmedic(substance) {
+async function fetchSwissmedic(substance) {
   show('swiss-loading'); hide('swiss-content'); hide('swiss-error'); hide('swiss-pending');
   try {
     const r = await fetch(`/.netlify/functions/swissmedic-v2?substance=${encodeURIComponent(substance)}`);
