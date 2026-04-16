@@ -1000,8 +1000,8 @@
             <div id="swiss-pv-alert" style="display:none" class="flag-item flag-warning mb-2">
               <i class="bi bi-bell-fill"></i>
               <div>
-                <div class="flag-label">Alerte pharmacovigilance Swissmedic détectée</div>
-                <div class="flag-detail" id="swiss-pv-detail">Cette substance est mentionnée dans les Vigilance News de Swissmedic.</div>
+                <div class="flag-label">Mention dans les Vigilance News Swissmedic</div>
+                <div class="flag-detail" id="swiss-pv-detail">Cette substance apparaît dans le contenu des Vigilance News Swissmedic (indication, non confirmée formellement).</div>
               </div>
             </div>
 
@@ -1357,22 +1357,25 @@ function renderEUProducts(results) {
       <div class="collapse show" id="${collapseId}">`;
 
     if (data.error && items.length === 0) {
-      const linkPart = data.link ? ` <a href="${data.link}" target="_blank" style="color:var(--accent)">Consulter ${meta.source}</a>` : '';
+      // Erreur réseau/source (ex: BDPM inaccessible pour FR)
+      const linkPart = data.link
+        ? ` <a href="${data.link}" target="_blank" style="color:var(--accent)">Consulter ${meta.source} directement</a>`
+        : '';
       html += `<div class="flag-item flag-secondary" style="margin:0 0 4px">
-        <i class="bi bi-info-circle"></i>
-        <span style="font-size:0.78rem;color:var(--text-muted)">${data.error.includes('timeout') ? 'Délai dépassé - données temporairement indisponibles' : 'Source indisponible : ' + data.error}${linkPart}</span>
+        <i class="bi bi-cloud-slash"></i>
+        <span style="font-size:0.78rem;color:var(--text-muted)">Données temporairement indisponibles.${linkPart}</span>
       </div>`;
     } else if (data.note && items.length === 0) {
-      // Pas d'API publique — afficher lien direct vers la base nationale
+      // Pas d'API publique (PT, BE) — lien vers base officielle
       const linkPart = data.link
         ? `<a href="${data.link}" target="_blank" style="color:var(--accent);margin-left:4px">Consulter ${meta.source} directement →</a>`
         : '';
       html += `<div style="padding:8px 12px;font-size:0.78rem;color:var(--text-muted)">
-        Pas d'API publique disponible pour ce pays.${linkPart}
+        Pas d'API JSON publique disponible pour ce pays.${linkPart}
       </div>`;
     } else if (items.length === 0) {
       html += `<div style="padding:8px 12px;font-size:0.78rem;color:var(--text-muted)">
-        Aucun produit identifié sur ce marché pour cette substance.
+        Aucun produit identifié dans cette base pour cette substance.
       </div>`;
     } else {
       html += `<table class="data-table" style="margin-bottom:0"><thead><tr><th>Médicament</th><th>Titulaire</th><th>Statut</th></tr></thead><tbody>`;
@@ -2271,21 +2274,42 @@ function renderEMA(d) {
   const pracActive   = d.pracActive   || false;
   const hasPsusas    = psusas.length > 0;
 
-  // ---- Métriques principales ----
+  // ---- Métriques principales — pvSignal comme source de vérité unique ----
+  const sig = d.pvSignal || 'none';
   const pracEl = document.getElementById('m-ema-prac');
-  if (pracActive) {
-    pracEl.textContent = d.isSafetyReferral ? '🔴 Safety' : '🟡 Actif';
-    pracEl.style.color = d.isSafetyReferral ? '#ef4444' : '#f59e0b';
-  } else if (hasPsusas) {
-    pracEl.textContent = '🟡 PSUSA';
-    pracEl.style.color = '#f59e0b';
+  if (sig === 'safety') {
+    pracEl.textContent = '🔴 Safety'; pracEl.style.color = '#ef4444';
+  } else if (sig === 'prac') {
+    pracEl.textContent = '🟡 Actif'; pracEl.style.color = '#f59e0b';
+  } else if (sig === 'psusa') {
+    pracEl.textContent = '🟡 PSUSA'; pracEl.style.color = '#f59e0b';
+  } else if (sig === 'dhpc') {
+    pracEl.textContent = '🟡 DHPC'; pracEl.style.color = '#f59e0b';
+  } else if (sig === 'historical') {
+    pracEl.textContent = '🔵 Historique'; pracEl.style.color = '#3b82f6';
   } else {
-    pracEl.textContent = '🟢 Aucun';
-    pracEl.style.color = '#10b981';
+    pracEl.textContent = '🟢 Aucun'; pracEl.style.color = '#10b981';
   }
 
-  document.getElementById('m-ema-referrals').textContent = allReferrals.length || '0';
-  document.getElementById('m-ema-referrals').style.color = allReferrals.length > 0 ? '#f59e0b' : 'var(--text-muted)';
+  // Compteurs : referrals = total (actifs + historiques), psusa, dhpc
+  const activeCount = d.activeReferralCount || 0;
+  const totalRefCount = allReferrals.length;
+  const refEl = document.getElementById('m-ema-referrals');
+  refEl.textContent = totalRefCount || '0';
+  refEl.style.color = totalRefCount > 0 ? '#f59e0b' : 'var(--text-muted)';
+  // Sous-label : préciser actifs vs historiques si les deux existent
+  const refSub = refEl.parentElement ? refEl.parentElement.querySelector('.metric-sub') : null;
+  if (refSub) {
+    if (activeCount > 0 && d.historicalReferralCount > 0) {
+      refSub.textContent = activeCount + ' actif(s) · ' + d.historicalReferralCount + ' historique(s)';
+    } else if (activeCount > 0) {
+      refSub.textContent = 'Procédure(s) active(s)';
+    } else if (d.historicalReferralCount > 0) {
+      refSub.textContent = 'Procédure(s) historique(s)';
+    } else {
+      refSub.textContent = 'Art. 30/31/107i';
+    }
+  }
 
   const psusaEl = document.getElementById('m-ema-psusa');
   psusaEl.textContent = psusas.length || '0';
@@ -2294,7 +2318,7 @@ function renderEMA(d) {
   document.getElementById('m-ema-dhpc').textContent = dhpcs.length || '0';
   document.getElementById('m-ema-dhpc').style.color = dhpcs.length > 0 ? '#f59e0b' : 'var(--text-muted)';
 
-  // ---- Alerte PRAC principale ----
+  // ---- Bannière principale PRAC / historique / aucun ----
   if (pracActive) {
     show('ema-prac-alert');
     hide('ema-no-prac');
@@ -2324,11 +2348,24 @@ function renderEMA(d) {
     } else {
       hide('ema-prac-alert-link');
     }
-  } else if (!pracActive && !hasPsusas) {
+  } else if (sig === 'historical') {
+    // Procédures historiques uniquement — pas d'alerte active, mention neutre
     hide('ema-prac-alert');
+    const noEl = document.getElementById('ema-no-prac');
+    noEl.querySelector('.flag-label').textContent = 'Procédure(s) EMA historique(s)';
+    noEl.querySelector('.flag-detail').textContent =
+      d.historicalReferralCount + ' procédure(s) EMA répertoriée(s) — aucune procédure active en cours.';
+    noEl.className = 'flag-item flag-secondary';
+    show('ema-no-prac');
+  } else if (sig === 'none' && !hasPsusas) {
+    hide('ema-prac-alert');
+    const noEl = document.getElementById('ema-no-prac');
+    noEl.querySelector('.flag-label').textContent = 'Aucun referral PRAC trouvé';
+    noEl.querySelector('.flag-detail').textContent = 'Aucune procédure de sécurité EMA répertoriée pour cette substance.';
+    noEl.className = 'flag-item flag-success';
     show('ema-no-prac');
   } else {
-    // PSUSAs exist but no referrals → no red alert, no green "aucun"
+    // PSUSAs ou DHPCs uniquement — ni alerte rouge ni "aucun" vert
     hide('ema-prac-alert');
     hide('ema-no-prac');
   }
@@ -2496,32 +2533,17 @@ function injectEmaFlagsIntoSafety(d) {
     container.insertAdjacentHTML('afterbegin', fragments.join(''));
   }
 
-  const _rEs=document.getElementById('reg-ema-status');
-  const _rEd=document.getElementById('reg-ema-detail');
-  const _mEP=document.getElementById('m-ema-prac-safety');
-  // Utiliser d.pvSignal (calculé backend) comme source de vérité — fallback sur les champs individuels
-  const _sig = d.pvSignal || (d.pracActive && d.isSafetyReferral ? 'safety' : d.pracActive ? 'prac' : psusas.length > 0 ? 'psusa' : d.hasDhpc ? 'dhpc' : 'none');
-  if (_rEs) {
-    if (_sig === 'safety') {
-      if(_rEs){_rEs.textContent='🔴 Signal PRAC';_rEs.style.color='#ef4444';}
-      _rEd.textContent=d.pracDetails?d.pracDetails.slice(0,60):'Referral sécurité actif';
-      if(_mEP){_mEP.textContent='🔴 Safety';_mEP.style.color='#ef4444';}
-    } else if (_sig === 'prac') {
-      if(_rEs){_rEs.textContent='🟡 Procédure EMA';_rEs.style.color='#f59e0b';}
-      _rEd.textContent=d.pracDetails?d.pracDetails.slice(0,60):'';
-      if(_mEP){_mEP.textContent='🟡 PRAC';_mEP.style.color='#f59e0b';}
-    } else if (_sig === 'psusa') {
-      if(_rEs){_rEs.textContent='🟡 PSUSA';_rEs.style.color='#f59e0b';}
-      _rEd.textContent=psusas[0]?.outcome ? psusas[0].outcome.slice(0,60) : 'Bilan périodique de sécurité (' + psusas.length + ')';
-      if(_mEP){_mEP.textContent='🟡 PSUSA';_mEP.style.color='#f59e0b';}
-    } else if (_sig === 'dhpc') {
-      if(_rEs){_rEs.textContent='🟡 DHPC';_rEs.style.color='#f59e0b';}
-      _rEd.textContent='Communication sécurité professionnels';
-      if(_mEP){_mEP.textContent='🟡 DHPC';_mEP.style.color='#f59e0b';}
-    } else {
-      if(_rEs){_rEs.textContent='🟢 Aucun signal';_rEs.style.color='#10b981';}if(_rEd){_rEd.textContent='';}
-      if(_mEP){_mEP.textContent='🟢 Aucun';_mEP.style.color='#10b981';}
-    }
+  // Mettre à jour le KPI "Signal PRAC" dans l'onglet Sécurité
+  // pvSignal est la source de vérité unique (calculée backend)
+  const _sig = d.pvSignal || 'none';
+  const _mEP = document.getElementById('m-ema-prac-safety');
+  if (_mEP) {
+    if      (_sig === 'safety')   { _mEP.textContent = '🔴 Safety';     _mEP.style.color = '#ef4444'; }
+    else if (_sig === 'prac')     { _mEP.textContent = '🟡 PRAC';       _mEP.style.color = '#f59e0b'; }
+    else if (_sig === 'psusa')    { _mEP.textContent = '🟡 PSUSA';      _mEP.style.color = '#f59e0b'; }
+    else if (_sig === 'dhpc')     { _mEP.textContent = '🟡 DHPC';       _mEP.style.color = '#f59e0b'; }
+    else if (_sig === 'historical'){ _mEP.textContent = '🔵 Historique'; _mEP.style.color = '#3b82f6'; }
+    else                          { _mEP.textContent = '🟢 Aucun';      _mEP.style.color = '#10b981'; }
   }
 }
 
@@ -2554,7 +2576,7 @@ function injectSwissFlagsIntoSafety(d) {
       if(_rSd){_rSd.textContent=d.totalCHProducts+' produit(s) Swissmedic';}
       if(_mSP){_mSP.textContent='🟢 Autorisé';_mSP.style.color='#10b981';}
     } else {
-      if(_rSs){_rSs.textContent='⚪ Absent du marché CH';}_rSs.style.color='var(--text-muted)';
+      if(_rSs){_rSs.textContent='⚪ Absent du marché CH';_rSs.style.color='var(--text-muted)';}
       if(_rSd){_rSd.textContent='';}
       if(_mSP){_mSP.textContent='--';_mSP.style.color='var(--text-muted)';}
     }
