@@ -1,9 +1,9 @@
 /**
- * PharmaScout — Netlify Function : EU Products v4
+ * PharmaScout — Netlify Function : EU Products v7
  *
- * FR → BDPM officiel (CIS_COMPO + CIS) avec cache Lambda 24h
- *       Téléchargements parallèles pour tenir dans le timeout Netlify (10s)
- * ES → CIMA REST API v1.23 (AEMPS) — substance active (practiv1)
+ * FR → BDPM HTML search par substance (remplace téléchargement CSV)
+ *       Cache par substance 30min TTL — requête ciblée, User-Agent navigateur
+ * ES → CIMA REST API v1.23 (AEMPS) — substance active (practiv1), multi-case
  * PT → Graceful empty — INFARMED INFOMED sans API JSON publique ouverte
  * BE → Graceful empty — SAM/FAMHP sans API JSON publique ouverte
  */
@@ -17,165 +17,200 @@ const HEADERS = {
   'Access-Control-Allow-Headers': 'Content-Type'
 };
 
-// ─── Cache module-level BDPM (warm Lambda — comme swissmedic-v2.js) ───────────
-let _bdpmCache = { compo: null, cis: null, ts: 0 };
-const BDPM_CACHE_TTL = 24 * 60 * 60 * 1000; // 24h
-
-const BDPM_COMPO_URL = 'https://base-donnees-publique.medicaments.gouv.fr/telechargement.php?fichier=CIS_COMPO_bdpm.txt';
-const BDPM_CIS_URL   = 'https://base-donnees-publique.medicaments.gouv.fr/telechargement.php?fichier=CIS_bdpm.txt';
-
 // Liens vers les bases nationales officielles
 const COUNTRY_LINKS = {
   fr: 'https://base-donnees-publique.medicaments.gouv.fr/',
+  es: 'https://cima.aemps.es/cima/publico/home.html',
   pt: 'https://extranet.infarmed.pt/INFOMED-fo/',
   be: 'https://www.famhp.be/en/human_use/medicines/medicines/information_about_medicines/authorised_medicines_in_belgium'
 };
 
-// ─── Helper : télécharger un fichier texte CSV en entier (Latin-1) ────────────
-function downloadTextFile(url, timeoutMs = 8000) {
+// ─── Cache par substance pour la France (30min TTL) ──────────────────────────
+const _frCache = new Map(); // substance → { products: [], ts: number }
+const FR_CACHE_TTL = 30 * 60 * 1000; // 30 minutes
+
+// ─── Helper : requête HTML avec User-Agent navigateur ────────────────────────
+function fetchHtml(url, timeoutMs) {
   return new Promise((resolve, reject) => {
-    const parsedUrl = new URL(url);
+    let parsedUrl;
+    try { parsedUrl = new URL(url); } catch(e) { return reject(e); }
     const req = https.request({
       hostname: parsedUrl.hostname,
       path: parsedUrl.pathname + parsedUrl.search,
       method: 'GET',
       timeout: timeoutMs,
       headers: {
-        'User-Agent': 'PharmaScout/1.0',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'fr-FR,fr;q=0.9,en;q=0.8',
         'Accept-Encoding': 'gzip, deflate',
-        'Accept': 'text/plain'
+        'Referer': 'https://base-donnees-publique.medicaments.gouv.fr/'
       }
     }, (res) => {
-      // Gérer les redirections
-      if (res.statusCode === 301 || res.statusCode === 302) {
+      if (res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 303) {
         res.resume();
-        downloadTextFile(res.headers.location, timeoutMs).then(resolve).catch(reject);
+        const loc = res.headers.location;
+        if (!loc) return reject(new Error('Redirect sans Location'));
+        const absLoc = loc.startsWith('http') ? loc : 'https://' + parsedUrl.hostname + loc;
+        fetchHtml(absLoc, timeoutMs).then(resolve).catch(reject);
+        return;
+      }
+      if (res.statusCode < 200 || res.statusCode >= 300) {
+        res.resume();
+        reject(new Error('HTTP ' + res.statusCode));
         return;
       }
       let stream = res;
       const enc = res.headers['content-encoding'];
       if (enc === 'gzip')    stream = res.pipe(zlib.createGunzip());
       if (enc === 'deflate') stream = res.pipe(zlib.createInflate());
-
       const chunks = [];
       stream.on('data', c => chunks.push(c));
-      stream.on('end', () => resolve(Buffer.concat(chunks).toString('latin1')));
+      stream.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
       stream.on('error', reject);
     });
-    req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
+    req.on('timeout', () => { req.destroy(); reject(new Error('timeout ' + url.slice(0,80))); });
     req.on('error', reject);
     req.end();
   });
 }
 
-// ─── Charger BDPM (avec cache 24h) ───────────────────────────────────────────
-async function loadBdpmCache() {
-  const now = Date.now();
-  if (_bdpmCache.compo && _bdpmCache.cis && (now - _bdpmCache.ts) < BDPM_CACHE_TTL) {
-    return _bdpmCache;
-  }
-  // Téléchargements en parallèle
-  const [compoRaw, cisRaw] = await Promise.all([
-    downloadTextFile(BDPM_COMPO_URL, 8000),
-    downloadTextFile(BDPM_CIS_URL,   8000)
-  ]);
-
-  // Parser CIS_COMPO : CIS → Set of substances (champ idx 3, séparateur tab)
-  const compoMap = new Map(); // CIS → [substanceName...]
-  for (const line of compoRaw.split('\n')) {
-    const p = line.split('\t');
-    if (p.length >= 4 && p[0]) {
-      const cis  = p[0].trim();
-      const subst = (p[3] || '').trim().toLowerCase();
-      if (!compoMap.has(cis)) compoMap.set(cis, []);
-      compoMap.get(cis).push(subst);
-    }
-  }
-
-  // Parser CIS_bdpm : CIS → { name, holder, status }
-  const cisMap = new Map();
-  for (const line of cisRaw.split('\n')) {
-    const p = line.split('\t');
-    if (p.length >= 11 && p[0]) {
-      cisMap.set(p[0].trim(), {
-        name:   (p[1]  || '').trim(),
-        holder: (p[10] || '').trim(),
-        status: (p[6]  || 'Autorisé').trim()
-      });
-    }
-  }
-
-  _bdpmCache = { compo: compoMap, cis: cisMap, ts: now };
-  return _bdpmCache;
+// ─── Helper : décoder les entités HTML basiques ───────────────────────────────
+function decodeHtml(s) {
+  return (s || '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+                  .replace(/&quot;/g, '"').replace(/&#039;/g, "'").replace(/&eacute;/g, 'é')
+                  .replace(/&egrave;/g, 'è').replace(/&agrave;/g, 'à').replace(/&ccedil;/g, 'ç')
+                  .replace(/&nbsp;/g, ' ');
 }
 
-// ─── France — BDPM ────────────────────────────────────────────────────────────
-// Retourne :
-//   [] (tableau vide)  → BDPM accessible, substance non trouvée
-//   [products...]      → BDPM accessible, produits trouvés
-//   { bdpmError: msg } → BDPM inaccessible (timeout, réseau, etc.)
-async function fetchFrance(substance) {
-  try {
-    const cache = await loadBdpmCache();
-    const substLower = substance.toLowerCase();
+// ─── Parser HTML résultats BDPM ───────────────────────────────────────────────
+// Extrait les produits depuis la page de résultats de recherche BDPM.
+// Cherche les liens extrait.php?specif=CIS (présents dans toutes les versions du site).
+function parseBdpmResults(html) {
+  const products = [];
+  const seen = new Set();
 
-    // Matching : substring sur la DCI normalisée
-    // Gère aussi les variations (ex: "minoxidil" dans "minoxidil sulfate")
-    const matchingCIS = new Set();
-    for (const [cis, substances] of cache.compo) {
-      if (substances.some(s => s.includes(substLower) || substLower.includes(s.slice(0, Math.max(6, s.length - 3))))) {
-        matchingCIS.add(cis);
-      }
-    }
-
-    if (matchingCIS.size === 0) return []; // BDPM ok, substance absente
-
-    // Récupérer les détails depuis CIS map
-    const products = [];
-    for (const cis of matchingCIS) {
-      const prod = cache.cis.get(cis);
-      if (prod && prod.name) {
-        products.push({ ...prod });
-      }
-    }
-
-    // Dédupliquer par nom simplifié (coupe au premier chiffre ou virgule)
-    const seen = new Set();
-    const deduped = products.filter(p => {
-      const key = p.name.split(/[\d,]/)[0].trim().toUpperCase();
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-
-    return deduped.slice(0, 40);
-  } catch(e) {
-    console.warn('France BDPM error:', e.message);
-    // Distinguer erreur de "pas d'API" — retourner un objet avec bdpmError
-    return { bdpmError: e.message };
+  // Pattern principal : href="extrait.php?specif=12345678..."  >NOM</a>
+  const reLink = /href="extrait\.php\?specif=(\d{5,10})[^"]*"[^>]*>([\s\S]{2,120}?)<\/a/gi;
+  let m;
+  while ((m = reLink.exec(html)) !== null) {
+    const raw  = m[2].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    const name = decodeHtml(raw);
+    if (!name || name.length < 4) continue;
+    // Ignorer les textes de navigation (trop courts ou mots-clés UI)
+    if (/^(retour|imprimer|haut|bas|suivant|précédent|accueil|\d+)$/i.test(name)) continue;
+    const key = name.slice(0, 50).toUpperCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    products.push({ name, holder: '', status: 'Autorisé' });
   }
+
+  return products.slice(0, 40);
+}
+
+// ─── France — BDPM HTML Search ────────────────────────────────────────────────
+// Retourne :
+//   []             → BDPM accessible, substance non trouvée
+//   [products...]  → BDPM accessible, produits trouvés
+//   { bdpmError }  → BDPM inaccessible (timeout, réseau, erreur serveur)
+async function fetchFrance(substance) {
+  // Cache par substance
+  const cached = _frCache.get(substance);
+  if (cached && (Date.now() - cached.ts) < FR_CACHE_TTL) {
+    console.log('[BDPM] Cache hit: ' + substance + ' (' + cached.products.length + ' produits)');
+    return cached.products;
+  }
+
+  const encSubst = encodeURIComponent(substance);
+
+  // Essayer plusieurs URL de recherche BDPM (les deux interfaces historiques)
+  const searchUrls = [
+    // Interface principale — recherche par spécialité/DCI
+    'https://base-donnees-publique.medicaments.gouv.fr/index.php?typRecherche=spec&spec=' + encSubst + '&btnRecherche=Rechercher',
+    // Interface alternative — recherche par substance active
+    'https://base-donnees-publique.medicaments.gouv.fr/index.php?typRecherche=sa&nomSA='  + encSubst + '&btnRecherche=Rechercher',
+  ];
+
+  let lastError = null;
+
+  for (const url of searchUrls) {
+    try {
+      const html = await fetchHtml(url, 9000);
+      if (!html || html.length < 300) continue;
+
+      // Détecter explicitement "aucun résultat" → retourner [] (substance absente, pas erreur)
+      if (/aucun.{0,60}r[eé]sultat|pas de m[eé]dicament|0 r[eé]sultat|aucune sp[eé]cialit/i.test(html)
+          && !html.includes('extrait.php')) {
+        console.log('[BDPM] 0 résultat valide pour: ' + substance);
+        _frCache.set(substance, { products: [], ts: Date.now() });
+        return [];
+      }
+
+      const products = parseBdpmResults(html);
+
+      if (products.length > 0) {
+        console.log('[BDPM] ' + products.length + ' produits via HTML pour: ' + substance);
+        _frCache.set(substance, { products, ts: Date.now() });
+        return products;
+      }
+
+      // Réponse valide mais aucun lien extrait.php → substance absente
+      if (html.toLowerCase().includes('medicament') || html.toLowerCase().includes('bdpm')) {
+        console.log('[BDPM] Page valide mais 0 produit parsé pour: ' + substance + ' (url: ' + url.slice(0,80) + ')');
+        _frCache.set(substance, { products: [], ts: Date.now() });
+        return [];
+      }
+
+      // Page inattendue, essayer URL suivante
+      console.warn('[BDPM] Page inattendue (' + html.length + ' chars), essai URL suivante');
+    } catch(e) {
+      lastError = e;
+      console.warn('[BDPM] Erreur URL ' + url.slice(0,80) + ' : ' + e.message);
+    }
+  }
+
+  // Toutes les URL ont échoué
+  console.warn('[BDPM] Toutes les URL ont échoué pour: ' + substance);
+  return { bdpmError: lastError ? lastError.message : 'Serveur BDPM inaccessible' };
 }
 
 // ─── Espagne — CIMA REST API v1.23 ───────────────────────────────────────────
+// Tente lowercase, Titlecase, UPPERCASE si 0 résultat (CIMA est case-sensitive)
+// Retourne :
+//   [products...]  → CIMA accessible, produits (ou [] si substance absente)
+//   null           → CIMA inaccessible (toutes les tentatives ont échoué)
 async function fetchSpain(substance) {
-  try {
-    const url = `https://cima.aemps.es/cima/rest/medicamentos?practiv1=${encodeURIComponent(substance)}&pageSize=30&pageNumber=1`;
-    const res = await httpGetJson(url, 7000);
-    if (res.status === 200 && res.body) {
-      return (res.body.resultados || []).map(p => ({
-        name:   p.nombre     || '',
-        holder: p.labtitular || '',
-        status: p.estado?.nombre || 'Autorizado'
-      })).filter(p => p.name);
+  const toTitle = s => s.replace(/\b\w/g, c => c.toUpperCase());
+  const variants = [...new Set([substance.toLowerCase(), toTitle(substance), substance.toUpperCase()])];
+  let gotAnyOk = false;
+
+  for (const v of variants) {
+    try {
+      const url = 'https://cima.aemps.es/cima/rest/medicamentos?practiv1=' + encodeURIComponent(v) + '&pageSize=30&pageNumber=1';
+      const res = await httpGetJson(url, 7000);
+      if (res.status === 200 && res.body) {
+        gotAnyOk = true;
+        const list = (res.body.resultados || []).map(p => ({
+          name:   p.nombre     || '',
+          holder: p.labtitular || '',
+          status: p.estado?.nombre || 'Autorizado'
+        })).filter(p => p.name);
+        if (list.length > 0) {
+          console.log('[CIMA] ' + list.length + ' résultats pour variant: ' + v);
+          return list;
+        }
+        console.log('[CIMA] 0 résultat pour variant: ' + v);
+      }
+    } catch(e) {
+      console.warn('[CIMA] Erreur variant ' + v + ': ' + e.message);
     }
-  } catch(e) {
-    console.warn('Spain CIMA error:', e.message);
   }
-  return null;
+
+  return gotAnyOk ? [] : null;
 }
 
 // ─── Helper : GET JSON ────────────────────────────────────────────────────────
-function httpGetJson(url, timeoutMs = 7000) {
+function httpGetJson(url, timeoutMs) {
   return new Promise((resolve, reject) => {
     const parsedUrl = new URL(url);
     const req = https.request({
@@ -212,10 +247,10 @@ exports.handler = async function(event) {
   }
 
   const SOURCES = {
-    fr: { label: 'BDPM / ANSM', fetch: () => fetchFrance(substance) },
+    fr: { label: 'BDPM / ANSM',  fetch: () => fetchFrance(substance) },
     es: { label: 'CIMA / AEMPS', fetch: () => fetchSpain(substance)  },
-    pt: { label: 'INFARMED',    fetch: () => Promise.resolve(null)   },
-    be: { label: 'SAM / FAMHP', fetch: () => Promise.resolve(null)   }
+    pt: { label: 'INFARMED',     fetch: () => Promise.resolve(null)  },
+    be: { label: 'SAM / FAMHP',  fetch: () => Promise.resolve(null)  }
   };
 
   const meta = SOURCES[country];
@@ -223,21 +258,31 @@ exports.handler = async function(event) {
     return { statusCode: 400, headers: HEADERS, body: JSON.stringify({ error: 'Pays non supporté: ' + country }) };
   }
 
+  // Pays avec une API publique (null = API inaccessible, pas "pas d'API")
+  const HAS_API = new Set(['fr', 'es']);
+
   try {
     const result = await meta.fetch();
-
     let countryData;
 
     if (result === null) {
-      // Pays sans API JSON publique (PT, BE) — lien vers base officielle
-      countryData = {
-        country, source: meta.label,
-        products: [], total: 0,
-        note: 'Pas d\'API JSON publique disponible pour ce pays.',
-        link: COUNTRY_LINKS[country] || null
-      };
+      if (HAS_API.has(country)) {
+        countryData = {
+          country, source: meta.label,
+          products: [], total: 0,
+          error: meta.label + ' temporairement inaccessible.',
+          link: COUNTRY_LINKS[country] || null
+        };
+      } else {
+        // PT, BE — pas d'API JSON publique
+        countryData = {
+          country, source: meta.label,
+          products: [], total: 0,
+          note: 'Pas d\'API JSON publique disponible pour ce pays.',
+          link: COUNTRY_LINKS[country] || null
+        };
+      }
     } else if (result && result.bdpmError) {
-      // Erreur réseau/timeout sur le BDPM (spécifique FR)
       countryData = {
         country, source: meta.label,
         products: [], total: 0,
@@ -245,7 +290,6 @@ exports.handler = async function(event) {
         link: COUNTRY_LINKS[country] || null
       };
     } else {
-      // Succès — tableau de produits (peut être vide si substance absente)
       const products = Array.isArray(result) ? result : [];
       countryData = {
         country, source: meta.label,
