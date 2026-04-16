@@ -24,8 +24,9 @@ const BDPM_CACHE_TTL = 24 * 60 * 60 * 1000; // 24h
 const BDPM_COMPO_URL = 'https://base-donnees-publique.medicaments.gouv.fr/telechargement.php?fichier=CIS_COMPO_bdpm.txt';
 const BDPM_CIS_URL   = 'https://base-donnees-publique.medicaments.gouv.fr/telechargement.php?fichier=CIS_bdpm.txt';
 
-// Liens de redirection vers les bases nationales (quand pas d'API)
+// Liens vers les bases nationales officielles
 const COUNTRY_LINKS = {
+  fr: 'https://base-donnees-publique.medicaments.gouv.fr/',
   pt: 'https://extranet.infarmed.pt/INFOMED-fo/',
   be: 'https://www.famhp.be/en/human_use/medicines/medicines/information_about_medicines/authorised_medicines_in_belgium'
 };
@@ -109,20 +110,25 @@ async function loadBdpmCache() {
 }
 
 // ─── France — BDPM ────────────────────────────────────────────────────────────
+// Retourne :
+//   [] (tableau vide)  → BDPM accessible, substance non trouvée
+//   [products...]      → BDPM accessible, produits trouvés
+//   { bdpmError: msg } → BDPM inaccessible (timeout, réseau, etc.)
 async function fetchFrance(substance) {
   try {
     const cache = await loadBdpmCache();
     const substLower = substance.toLowerCase();
 
-    // Trouver les CIS codes dont la composition contient la substance
+    // Matching : substring sur la DCI normalisée
+    // Gère aussi les variations (ex: "minoxidil" dans "minoxidil sulfate")
     const matchingCIS = new Set();
     for (const [cis, substances] of cache.compo) {
-      if (substances.some(s => s.includes(substLower))) {
+      if (substances.some(s => s.includes(substLower) || substLower.includes(s.slice(0, Math.max(6, s.length - 3))))) {
         matchingCIS.add(cis);
       }
     }
 
-    if (matchingCIS.size === 0) return [];
+    if (matchingCIS.size === 0) return []; // BDPM ok, substance absente
 
     // Récupérer les détails depuis CIS map
     const products = [];
@@ -133,10 +139,9 @@ async function fetchFrance(substance) {
       }
     }
 
-    // Dédupliquer par nom (certains CIS ont plusieurs dosages)
+    // Dédupliquer par nom simplifié (coupe au premier chiffre ou virgule)
     const seen = new Set();
     const deduped = products.filter(p => {
-      // Clé = nom simplifié (jusqu'au premier chiffre ou virgule)
       const key = p.name.split(/[\d,]/)[0].trim().toUpperCase();
       if (seen.has(key)) return false;
       seen.add(key);
@@ -146,7 +151,8 @@ async function fetchFrance(substance) {
     return deduped.slice(0, 40);
   } catch(e) {
     console.warn('France BDPM error:', e.message);
-    return null; // null = erreur, pas de données
+    // Distinguer erreur de "pas d'API" — retourner un objet avec bdpmError
+    return { bdpmError: e.message };
   }
 }
 
@@ -218,25 +224,32 @@ exports.handler = async function(event) {
   }
 
   try {
-    const products = await meta.fetch();
+    const result = await meta.fetch();
 
     let countryData;
-    if (products === null) {
-      // Aucune API JSON publique disponible — message clair avec lien direct
+
+    if (result === null) {
+      // Pays sans API JSON publique (PT, BE) — lien vers base officielle
       countryData = {
-        country,
-        source: meta.label,
-        products: [],
-        total: 0,
-        note: 'Pas d\'API JSON publique disponible',
+        country, source: meta.label,
+        products: [], total: 0,
+        note: 'Pas d\'API JSON publique disponible pour ce pays.',
+        link: COUNTRY_LINKS[country] || null
+      };
+    } else if (result && result.bdpmError) {
+      // Erreur réseau/timeout sur le BDPM (spécifique FR)
+      countryData = {
+        country, source: meta.label,
+        products: [], total: 0,
+        error: 'Base BDPM temporairement inaccessible (' + result.bdpmError + ')',
         link: COUNTRY_LINKS[country] || null
       };
     } else {
+      // Succès — tableau de produits (peut être vide si substance absente)
+      const products = Array.isArray(result) ? result : [];
       countryData = {
-        country,
-        source: meta.label,
-        products,
-        total: products.length
+        country, source: meta.label,
+        products, total: products.length
       };
     }
 
@@ -247,10 +260,8 @@ exports.handler = async function(event) {
       headers: HEADERS,
       body: JSON.stringify({
         countries: [{
-          country,
-          source: meta.label,
-          products: [],
-          total: 0,
+          country, source: meta.label,
+          products: [], total: 0,
           error: err.message,
           link: COUNTRY_LINKS[country] || null
         }]
