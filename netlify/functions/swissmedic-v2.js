@@ -377,21 +377,20 @@ async function checkPharmacovigilance(substance) {
     try {
       const pvHtml = await fetchText(pvUrl, 8000);
 
-      // Extraire uniquement le contenu éditorial (balises <p>, <h2>, <h3>, <li>, <td>)
-      // Exclure les URLs href, attributs HTML et balises de navigation
-      const contentBlocks = [];
-      const blockPattern = /<(?:p|h[1-6]|li|td|th|div|span)[^>]*>([^<]{10,})<\/(?:p|h[1-6]|li|td|th|div|span)>/gi;
-      let m;
-      while ((m = blockPattern.exec(pvHtml)) !== null) {
-        contentBlocks.push(m[1].toLowerCase());
-      }
-      const editorialContent = contentBlocks.join(' ');
-
-      // Si l'extraction a échoué (page vide ou format différent), fallback sur le texte brut
-      // mais en supprimant d'abord les balises HTML et les URLs
-      const textContent = editorialContent.length > 200
-        ? editorialContent
-        : pvHtml.replace(/<[^>]+>/g, ' ').replace(/https?:\/\/\S+/g, ' ').toLowerCase();
+      // Extraire le texte visible : supprimer scripts/styles/URLs en attributs, puis les balises
+      // L'ordre est important : retirer les valeurs href/src/data-* avant de stripper les balises,
+      // pour que les noms de substances dans les URLs ne déclenchent pas de faux positifs,
+      // tout en conservant le texte visible des liens (ex: <a href="/minoxidil-review">Minoxidil</a>)
+      const textContent = pvHtml
+        .replace(/<script[\s\S]*?<\/script>/gi, ' ')   // retirer le JS inline
+        .replace(/<style[\s\S]*?<\/style>/gi, ' ')      // retirer le CSS inline
+        .replace(/\shref="[^"]*"/gi, '')                // retirer les valeurs href
+        .replace(/\ssrc="[^"]*"/gi, '')                 // retirer les valeurs src
+        .replace(/\saction="[^"]*"/gi, '')              // retirer les valeurs action
+        .replace(/\sdata-[a-z-]+="[^"]*"/gi, '')        // retirer les data-attributes
+        .replace(/<[^>]+>/g, ' ')                       // stripper les balises restantes
+        .replace(/\s+/g, ' ')                           // normaliser les espaces
+        .toLowerCase();
 
       let matchedStem = null;
       for (const stem of validStems) {
