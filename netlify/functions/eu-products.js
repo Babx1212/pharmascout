@@ -1,5 +1,5 @@
 /**
- * PharmaScout — Netlify Function : EU Products v11
+ * PharmaScout — Netlify Function : EU Products v12
  *
  * FR → BDPM REST API interne (/api/produit/by-substance-active)
  *       Découverte par reverse-engineering du bundle JS de la SPA BDPM (avril 2026)
@@ -16,6 +16,8 @@
  *       Clé HMAC dynamique : GET /api/config → {key}
  *       Token xsrf-token : JWT HS256 signé → sig.jti+exp
  *       Payload JWT : {a: userAgent, exp: now+300, jti: timestamp*rand}
+ *       IMPORTANT : champ "a" doit = User-Agent HTTP de la requête (validé côté serveur)
+ *       RPP max = 20 — pagination auto jusqu'à 100 résultats (5 pages)
  *       Réponse JSON : {rows: N, data: [{name, company, availability[], ...}]}
  *       Cache : 20 min par substance
  */
@@ -567,43 +569,67 @@ async function fetchBelgium(substance) {
     return cached.products;
   }
 
-  const config = await getBelgiumConfig();
-  const token  = generateBelgiumToken(config.key);
+  const config  = await getBelgiumConfig();
+  const RPP     = 20;   // max accepté par l'API medicinesdatabase.be
+  const MAX_ROW = 100;  // on récupère au max 100 produits (5 pages × 20)
+  const BASE_HEADERS = {
+    'Accept':     'application/json',
+    'Referer':    'https://medicinesdatabase.be/',
+    'Origin':     'https://medicinesdatabase.be',
+    'User-Agent': BE_UA
+  };
 
-  const url = 'https://medicinesdatabase.be/api/products'
-    + '?startRow=0&RPP=100&orderBy%5B%5D=name%20asc'
-    + '&term='  + encodeURIComponent(substance)
+  // Page 1
+  const token1  = generateBelgiumToken(config.key);
+  const url1    = 'https://medicinesdatabase.be/api/products'
+    + '?startRow=0&RPP=' + RPP + '&orderBy%5B%5D=name%20asc'
+    + '&term='    + encodeURIComponent(substance)
     + '&usage=human'
-    + '&v='    + encodeURIComponent(config.version);
+    + '&v='       + encodeURIComponent(config.version);
 
-  console.log('[FAMHP] GET products: ' + substance);
-  const data = await httpGetJson(url, 12000, {
-    'Accept':       'application/json',
-    'Referer':      'https://medicinesdatabase.be/',
-    'Origin':       'https://medicinesdatabase.be',
-    'User-Agent':   BE_UA,
-    'xsrf-token':   token
-  });
+  console.log('[FAMHP] GET products (page 1): ' + substance);
+  const data1 = await httpGetJson(url1, 12000, Object.assign({ 'xsrf-token': token1 }, BASE_HEADERS));
 
-  if (!data.data || !Array.isArray(data.data)) {
-    console.log('[FAMHP] Réponse inattendue: ' + JSON.stringify(data).slice(0, 100));
+  if (!data1.data || !Array.isArray(data1.data)) {
+    console.log('[FAMHP] Réponse inattendue: ' + JSON.stringify(data1).slice(0, 100));
     _beCache.set(substance, { products: [], ts: Date.now() });
     return [];
   }
 
-  console.log('[FAMHP] ' + data.rows + ' produits pour: ' + substance);
+  const total = data1.rows || 0;
+  console.log('[FAMHP] ' + total + ' produits pour: ' + substance);
+
+  let allData = data1.data.slice();
+
+  // Pagination — jusqu'à MAX_ROW résultats si nécessaire
+  let startRow = RPP;
+  while (allData.length < total && startRow < MAX_ROW) {
+    try {
+      const tokenN = generateBelgiumToken(config.key);
+      const urlN   = 'https://medicinesdatabase.be/api/products'
+        + '?startRow=' + startRow + '&RPP=' + RPP + '&orderBy%5B%5D=name%20asc'
+        + '&term='    + encodeURIComponent(substance)
+        + '&usage=human'
+        + '&v='       + encodeURIComponent(config.version);
+      console.log('[FAMHP] Page startRow=' + startRow + '...');
+      const dataN = await httpGetJson(urlN, 10000, Object.assign({ 'xsrf-token': tokenN }, BASE_HEADERS));
+      if (!dataN.data || !Array.isArray(dataN.data) || dataN.data.length === 0) break;
+      allData = allData.concat(dataN.data);
+      startRow += RPP;
+    } catch (e) {
+      console.warn('[FAMHP] Erreur pagination startRow=' + startRow + ': ' + e.message);
+      break;
+    }
+  }
 
   // availability est un tableau : ["available"], ["not_commercialised"], ou les deux
-  const products = data.data.map(p => {
-    const avail = Array.isArray(p.availability) ? p.availability : [];
+  const products = allData.map(p => {
+    const avail  = Array.isArray(p.availability) ? p.availability : [];
     const status = avail.includes('available') ? 'Commercialisé' : 'Non commercialisé';
-    return {
-      name:   p.name    || '',
-      holder: p.company || '',
-      status
-    };
+    return { name: p.name || '', holder: p.company || '', status };
   }).filter(p => p.name);
 
+  console.log('[FAMHP] ' + products.length + ' produits retenus pour: ' + substance);
   _beCache.set(substance, { products, ts: Date.now() });
   return products;
 }
