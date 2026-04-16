@@ -1,5 +1,5 @@
 /**
- * PharmaScout — Netlify Function : EU Products v14
+ * PharmaScout — Netlify Function : EU Products v15
  *
  * FR → BDPM REST API interne (/api/produit/by-substance-active)
  *       Découverte par reverse-engineering du bundle JS de la SPA BDPM (avril 2026)
@@ -710,10 +710,18 @@ function applyComboFilter(products, filters) {
   if (!filters || filters.length === 0) return products;
   return products.filter(p => {
     const nameLow  = (p.name || '').toLowerCase();
-    // _substances : tableau de DCI (fourni par l'API Belgique, Portugal à venir)
-    const subsList = (p._substances || []).join(' ');
-    const haystack = nameLow + ' ' + subsList;
-    return filters.every(f => haystack.includes(f.toLowerCase()));
+    // _substances : tableau de DCI (ex. Belgique "Betamethason" au lieu de "Betamethasone")
+    const subsLow  = (p._substances || []).map(s => s.toLowerCase());
+    // Matching souple : on tokenise le haystack (nom + DCI) et on vérifie
+    // qu'au moins un token est un préfixe du filtre OU vice-versa.
+    // "betamethasone" (filtre) ↔ "betamethason" (DCI néerlandais) → match ✅
+    const tokens = (nameLow + ' ' + subsLow.join(' '))
+      .split(/[\s,/\-()[\]]+/)
+      .filter(t => t.length > 3);
+    return filters.every(f => {
+      const fl = f.toLowerCase();
+      return tokens.some(t => fl.startsWith(t) || t.startsWith(fl));
+    });
   });
 }
 
