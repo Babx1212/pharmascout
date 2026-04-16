@@ -1,5 +1,5 @@
 /**
- * PharmaScout — Netlify Function : EU Products v15
+ * PharmaScout — Netlify Function : EU Products v16
  *
  * FR → BDPM REST API interne (/api/produit/by-substance-active)
  *       Découverte par reverse-engineering du bundle JS de la SPA BDPM (avril 2026)
@@ -281,13 +281,25 @@ async function fetchFrance(substance) {
   console.log('[BDPM] ' + data.recordsTotal + ' produits pour: ' + substance);
 
   // StatutBdm : 1 = Commercialisé, 0 = Non commercialisé / retiré
+  // SpecGeneDenom : DCI combinée ex. "LIDOCAINE/PRILOCAINE", "NOMEGESTROL ACETATE/ESTRADIOL"
+  //   → stockée dans _substances pour le filtrage combo A/B
   return data.data
     .filter(item => item.SpecDenom01)
-    .map(item => ({
-      name:   item.SpecDenom01,
-      holder: '',
-      status: item.StatutBdm === 1 ? 'Commercialisé' : 'Non commercialisé'
-    }));
+    .map(item => {
+      const obj = {
+        name:   item.SpecDenom01,
+        holder: '',
+        status: item.StatutBdm === 1 ? 'Commercialisé' : 'Non commercialisé'
+      };
+      if (item.SpecGeneDenom) {
+        const subs = item.SpecGeneDenom
+          .split(/[/+,;]/)
+          .map(s => s.trim().toLowerCase())
+          .filter(s => s.length > 1);
+        if (subs.length > 0) obj._substances = subs;
+      }
+      return obj;
+    });
 }
 
 // ─── Portugal — INFARMED INFOMED (JSF/PrimeFaces scraping) ───────────────────
@@ -382,11 +394,20 @@ function parseInfomedTableHtml(tableHtml) {
     const statusHtml = parts[7] || '';
     const marketed   = statusHtml.includes('ui-icon-truck');
 
-    products.push({
+    // parts[3] = colonne DCI — peut contenir plusieurs substances séparées par '/' ou '+'
+    // Ex : "LIDOCAÍNA/PRILOCAÍNA", "NOMEGESTROL ACETATO/ESTRADIOL"
+    const dciText = getCellText(parts[3]);
+    const ptSubs  = dciText
+      ? dciText.split(/[/+,;]/).map(s => s.trim().toLowerCase()).filter(s => s.length > 1)
+      : [];
+
+    const product = {
       name,
       holder: holder || '',
       status: marketed ? 'Comercializado' : 'Autorizado'
-    });
+    };
+    if (ptSubs.length > 0) product._substances = ptSubs;
+    products.push(product);
   }
   return products;
 }
@@ -668,11 +689,19 @@ async function fetchSpain(substance) {
       const url = 'https://cima.aemps.es/cima/rest/medicamentos?practiv1=' + encodeURIComponent(v) + '&pageSize=30&pageNumber=1';
       const data = await httpGetJson(url, 7000);
       gotAnyOk = true;
-      const list = (data.resultados || []).map(p => ({
-        name:   p.nombre     || '',
-        holder: p.labtitular || '',
-        status: p.estado?.nombre || 'Autorizado'
-      })).filter(p => p.name);
+      // pactiv1/2/3 : DCI des substances actives → stockées dans _substances pour filtrage combo
+      const list = (data.resultados || []).map(p => {
+        const obj = {
+          name:   p.nombre     || '',
+          holder: p.labtitular || '',
+          status: p.estado?.nombre || 'Autorizado'
+        };
+        const subs = [p.pactiv1, p.pactiv2, p.pactiv3]
+          .filter(Boolean)
+          .map(s => s.toLowerCase().trim());
+        if (subs.length > 0) obj._substances = subs;
+        return obj;
+      }).filter(p => p.name);
       if (list.length > 0) {
         console.log('[CIMA] ' + list.length + ' résultats pour variant: ' + v);
         _esCache.set(substance, { products: list, ts: Date.now() });
