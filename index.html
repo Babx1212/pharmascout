@@ -602,6 +602,7 @@
           <div class="brand-sub">Évaluation d'attractivité - Génériques &amp; Biosimilaires</div>        </div>
       </div>
       <span class="header-badge">Usage interne</span>
+      <span style="font-size:0.65rem;color:rgba(255,255,255,0.3);margin-left:8px">fix28</span>
     </div>
   </div>
 </div>
@@ -1320,6 +1321,7 @@ async function fetchEUProducts(substance, resolverInfo, analysisId) {
     // Discard if a newer analysis was launched while we were waiting
     if (analysisId !== _currentAnalysisId) return;
     hide('eu-products-loading');
+    hide('eu-products-pending');   // belt-and-suspenders
     renderEUProducts(results, resolverInfo);
   } catch(e) {
     if (analysisId !== _currentAnalysisId) return;
@@ -1487,6 +1489,7 @@ function checkReady() {
 let rxnormTimer = null;
 let currentSuggestion = null;
 let _currentAnalysisId = 0;  // incremented each analyze() — stale callbacks compare against this
+let _analyzeRunning = false;  // true while analyze() is executing — suppresses in-flight RxNorm
 
 function triggerRxNorm(val) {
   clearTimeout(rxnormTimer);
@@ -1508,6 +1511,10 @@ async function fetchRxNormSuggestions(term) {
   try {
     const r = await fetch(`https://rxnav.nlm.nih.gov/REST/spellingsuggestions.json?name=${encodeURIComponent(term)}`);
     const d = await r.json();
+
+    // Guard: if analyze() started while this was in-flight, discard silently
+    if (_analyzeRunning) return;
+
     const suggestions = d.suggestionGroup?.suggestionList?.suggestion || [];
 
     const dropdown = document.getElementById('rxnorm-dropdown');
@@ -1521,15 +1528,17 @@ async function fetchRxNormSuggestions(term) {
     const inputVal = document.getElementById('substance-input').value.trim().toLowerCase();
     const firstSuggestion = suggestions[0].toLowerCase();
 
-    // Si la première suggestion diff-re de ce que l'utilisateur a tapé -- correction
+    // Mutual exclusion: each branch explicitly hides the OTHER element
     if (firstSuggestion !== inputVal) {
       currentSuggestion = suggestions[0];
       document.getElementById('rxnorm-suggestion-text').textContent = suggestions[0];
       document.getElementById('rxnorm-suggestion').style.display = 'block';
+      document.getElementById('rxnorm-validated').style.display = 'none';  // hide validated
     } else {
       // Nom déjà correct -- badge validé
       document.getElementById('rxnorm-validated-text').textContent = suggestions[0];
       document.getElementById('rxnorm-validated').style.display = 'block';
+      document.getElementById('rxnorm-suggestion').style.display = 'none';  // hide suggestion
       currentSuggestion = suggestions[0];
     }
 
@@ -2178,9 +2187,11 @@ async function analyze() {
   let substance = document.getElementById('substance-input').value.trim().toLowerCase();
   if (!substance) return;
 
-  // Symptom 1: cancel pending debounced RxNorm call + hide stale banners
+  // Symptom 1: cancel pending debounced RxNorm call + hide ALL banners (both suggestion + validated)
   clearTimeout(rxnormTimer);
+  _analyzeRunning = true;  // suppress any in-flight fetchRxNormSuggestions
   document.getElementById('rxnorm-suggestion').style.display = 'none';
+  document.getElementById('rxnorm-validated').style.display = 'none';
   document.getElementById('rxnorm-dropdown').style.display = 'none';
 
   // Symptoms 2-5: stamp this analysis — stale async callbacks will self-discard
@@ -2271,12 +2282,13 @@ async function analyze() {
     state.marketScore = calcMarket(state.iqvia);
     state.composite = calcComposite(state.safetyScore, state.competitionScore, state.marketScore, ws, wc, wm);
 
-    setLoading(false)
-;
+    setLoading(false);
+    _analyzeRunning = false;
     renderResults();
 
   } catch(err) {
     setLoading(false);
+    _analyzeRunning = false;
     alert('Erreur lors de l\'analyse : ' + err.message + '\nVérifiez votre connexion internet.');
     console.error(err);
   }
@@ -2390,6 +2402,7 @@ async function fetchEMA(substance, analysisId) {
 
 function renderEMA(d) {
   hide('ema-loading');
+  hide('ema-pending');   // belt-and-suspenders: ensure pending never co-exists with content
   show('ema-content');
 
   const allReferrals = d.allReferrals || [];
@@ -2754,6 +2767,7 @@ function injectSwissFlagsIntoSafety(d) {
 
 function renderSwissmedic(d) {
   hide('swiss-loading');
+  hide('swiss-pending');   // belt-and-suspenders
   show('swiss-content');
 
   const mono = d.products || [];
