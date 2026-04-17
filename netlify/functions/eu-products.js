@@ -1,5 +1,5 @@
 /**
- * PharmaScout — Netlify Function : EU Products v18
+ * PharmaScout — Netlify Function : EU Products v20
  *
  * FR → BDPM REST API interne (/api/produit/by-substance-active)
  *       Découverte par reverse-engineering du bundle JS de la SPA BDPM (avril 2026)
@@ -810,23 +810,355 @@ function applyComboFilter(products, filters) {
   });
 }
 
+// ─── Resolver : normalisation et résolution des entrées utilisateur ──────────
+// Architecture :
+//   1. Dict curé (sync, O(1)) — classes, ambiguïtés, divergences US/EU, EU brands absents de RxNorm
+//   2. RxNorm API (async, NIH/NLM, publique, gratuite) — résolution dynamique de tout le reste
+//      approximateTerm → score de confiance + rxcui → allrelated → ingrédients (TTY=IN)
+//   3. Passthrough — si RxNorm ne trouve rien (comportement actuel préservé)
+//
+// Types de sortie :
+//   substance   → DCI/INN déjà canonique (confirmé par RxNorm ou dict)
+//   synonym     → synonyme clair (acetaminophen → paracetamol)
+//   latin       → forme latine (lidocainum → lidocaine)
+//   brand       → nom de marque → DCI (Humira → adalimumab, Symbicort → budesonide/formoterol)
+//   combo       → combinaison multi-substances (via séparateurs +/and ou marque multi-ingrédient)
+//   acronym     → acronyme non ambigu (ASA → acetylsalicylic acid)
+//   class       → classe thérapeutique → pas d'analyse directe, suggestions exposées
+//   ambiguous   → terme ambigu → analyse avec avertissement
+//   passthrough → non reconnu → envoyé tel quel
+//
+// Clés du dict : toutes en lowercase, sans accents (comparaison via stripAccents)
+
+// Cache des résolutions RxNorm (1h) — évite la latence sur les répétitions
+const _resolverCache    = new Map();
+const RESOLVER_CACHE_TTL = 60 * 60 * 1000;
+
+// Divergences INN US → INN EU (appliqué sur la sortie RxNorm si besoin)
+const US_TO_EU_INN = {
+  'acetaminophen':     'paracetamol',
+  'epinephrine':       'adrenaline',
+  'norepinephrine':    'noradrenaline',
+  'albuterol':         'salbutamol',
+  'dextroamphetamine': 'dexamfetamine',
+  'methylphenidate':   'methylphenidate',  // same in EU — placeholder pour la structure
+};
+
+// Résolution dynamique via l'API RxNorm (2 appels max, ~300ms à froid, 0ms en cache)
+async function resolveViaRxNorm(term) {
+  const cached = _resolverCache.get(term);
+  if (cached && (Date.now() - cached.ts) < RESOLVER_CACHE_TTL) {
+    console.log('[rxnorm] cache hit: ' + term);
+    return cached.result;
+  }
+
+  const BASE = 'https://rxnav.nlm.nih.gov/REST';
+  const store = (result) => { _resolverCache.set(term, { result, ts: Date.now() }); return result; };
+
+  try {
+    // ── Étape 1 : correspondance approchée → score de confiance + rxcui ────
+    const approx = await httpGetJson(
+      BASE + '/approximateTerm.json?term=' + encodeURIComponent(term) + '&maxEntries=1',
+      5000
+    );
+    const candidates = approx?.approximateGroup?.candidate || [];
+    if (!candidates.length) { console.log('[rxnorm] aucun match: ' + term); return store({ resolved: false }); }
+
+    const score  = parseInt(candidates[0].score, 10) || 0;
+    const rxcui  = candidates[0].rxcui;
+    if (score < 60) { console.log('[rxnorm] score trop faible (' + score + '): ' + term); return store({ resolved: false }); }
+
+    const confidence = score >= 80 ? 'high' : 'medium';
+
+    // ── Étape 2 : récupérer tous les concepts liés → ingrédients TTY=IN/PIN ─
+    const rel    = await httpGetJson(BASE + '/rxcui/' + rxcui + '/allrelated.json', 5000);
+    const groups = rel?.allRelatedGroup?.conceptGroup || [];
+
+    const ingredients = [];
+    const seen = new Set();
+    for (const g of groups) {
+      if (g.tty !== 'IN' && g.tty !== 'PIN') continue;
+      for (const p of (g.conceptProperties || [])) {
+        if (!p.rxcui || !p.name || seen.has(p.rxcui)) continue;
+        seen.add(p.rxcui);
+        const eu = US_TO_EU_INN[p.name.toLowerCase()] || p.name.toLowerCase();
+        if (!ingredients.includes(eu)) ingredients.push(eu);
+      }
+    }
+
+    if (!ingredients.length) { console.log('[rxnorm] aucun ingrédient pour ' + rxcui + ' (' + term + ')'); return store({ resolved: false }); }
+
+    // Si l'input est déjà l'un des ingrédients → passthrough (déjà canonique)
+    const isInn = ingredients.some(i => stripAccents(i) === stripAccents(term));
+    const type  = isInn ? 'passthrough' : 'brand';
+
+    console.log('[rxnorm] "' + term + '" → [' + ingredients.join(', ') + '] score=' + score + ' type=' + type);
+    return store({ resolved: true, type, canonical: ingredients, confidence, score });
+
+  } catch(e) {
+    console.warn('[rxnorm] erreur "' + term + '": ' + e.message.slice(0, 80));
+    return store({ resolved: false });
+  }
+}
+
+const RESOLVER_DICT = {
+
+  // ── Synonymes / variantes orthographiques ────────────────────────────────
+  'acetaminophen':              { type: 'synonym',   canonical: ['paracetamol'] },
+  'paracetamolum':              { type: 'latin',     canonical: ['paracetamol'] },
+  'lignocaine':                 { type: 'synonym',   canonical: ['lidocaine'] },
+  'lidocainum':                 { type: 'latin',     canonical: ['lidocaine'] },
+  'lignocainum':                { type: 'latin',     canonical: ['lidocaine'] },
+  'epinephrine':                { type: 'synonym',   canonical: ['adrenaline'] },
+  'adrenalin':                  { type: 'synonym',   canonical: ['adrenaline'] },
+  'cyclosporin':                { type: 'synonym',   canonical: ['ciclosporin'] },
+  'cyclosporine':               { type: 'synonym',   canonical: ['ciclosporin'] },
+  'ciclosporine':               { type: 'synonym',   canonical: ['ciclosporin'] },
+  'salbutamol':                 { type: 'substance', canonical: ['salbutamol'] },
+  'albuterol':                  { type: 'synonym',   canonical: ['salbutamol'] },
+  'acetylsalicylate':           { type: 'synonym',   canonical: ['acetylsalicylic acid'] },
+  'acide acetylsalicylique':    { type: 'synonym',   canonical: ['acetylsalicylic acid'] },
+  'acido acetilsalicilico':     { type: 'synonym',   canonical: ['acetylsalicylic acid'] },
+
+  // ── Acronymes non ambigus ─────────────────────────────────────────────────
+  'asa':    { type: 'acronym',   canonical: ['acetylsalicylic acid'] },
+  'hcq':    { type: 'acronym',   canonical: ['hydroxychloroquine'] },
+  'hcqs':   { type: 'acronym',   canonical: ['hydroxychloroquine'] },
+  'cbd':    { type: 'acronym',   canonical: ['cannabidiol'] },
+  'thc':    { type: 'acronym',   canonical: ['dronabinol'] },
+  'gcs':    { type: 'ambiguous', canonical: [], warning: 'GCS peut désigner les glucocorticoïdes (classe) ou le Glasgow Coma Scale.' },
+
+  // ── Marques → DCI ─────────────────────────────────────────────────────────
+  // Immunologie / biothérapies
+  'humira':     { type: 'brand', canonical: ['adalimumab'] },
+  'remicade':   { type: 'brand', canonical: ['infliximab'] },
+  'enbrel':     { type: 'brand', canonical: ['etanercept'] },
+  'stelara':    { type: 'brand', canonical: ['ustekinumab'] },
+  'dupixent':   { type: 'brand', canonical: ['dupilumab'] },
+  'entyvio':    { type: 'brand', canonical: ['vedolizumab'] },
+  'simponi':    { type: 'brand', canonical: ['golimumab'] },
+  'cimzia':     { type: 'brand', canonical: ['certolizumab'] },
+  'cosentyx':   { type: 'brand', canonical: ['secukinumab'] },
+  // Oncologie
+  'keytruda':   { type: 'brand', canonical: ['pembrolizumab'] },
+  'opdivo':     { type: 'brand', canonical: ['nivolumab'] },
+  'herceptin':  { type: 'brand', canonical: ['trastuzumab'] },
+  'avastin':    { type: 'brand', canonical: ['bevacizumab'] },
+  'rituxan':    { type: 'brand', canonical: ['rituximab'] },
+  'mabthera':   { type: 'brand', canonical: ['rituximab'] },
+  'tafinlar':   { type: 'brand', canonical: ['dabrafenib'] },
+  'mekinist':   { type: 'brand', canonical: ['trametinib'] },
+  // Analgésiques / AINS
+  'doliprane':  { type: 'brand', canonical: ['paracetamol'] },
+  'efferalgan': { type: 'brand', canonical: ['paracetamol'] },
+  'dafalgan':   { type: 'brand', canonical: ['paracetamol'] },
+  'tylenol':    { type: 'brand', canonical: ['paracetamol'] },
+  'advil':      { type: 'brand', canonical: ['ibuprofen'] },
+  'nurofen':    { type: 'brand', canonical: ['ibuprofen'] },
+  'brufen':     { type: 'brand', canonical: ['ibuprofen'] },
+  'aspirin':    { type: 'brand', canonical: ['acetylsalicylic acid'] },
+  'aspirine':   { type: 'brand', canonical: ['acetylsalicylic acid'] },
+  'aspegic':    { type: 'brand', canonical: ['acetylsalicylic acid'] },
+  'kardegic':   { type: 'brand', canonical: ['acetylsalicylic acid'] },
+  'voltaren':   { type: 'brand', canonical: ['diclofenac'] },
+  'celebrex':   { type: 'brand', canonical: ['celecoxib'] },
+  // Anesthésiques locaux / combos
+  'emla':       { type: 'brand', canonical: ['lidocaine', 'prilocaine'] },
+  'versatis':   { type: 'brand', canonical: ['lidocaine'] },
+  // Contraceptifs
+  'zoely':      { type: 'brand', canonical: ['nomegestrol acetate', 'estradiol'] },
+  'qlaira':     { type: 'brand', canonical: ['estradiol valerate', 'dienogest'] },
+  // Dermatologie
+  'dovobet':    { type: 'brand', canonical: ['calcipotriol', 'betamethasone dipropionate'] },
+  'enstilum':   { type: 'brand', canonical: ['calcipotriol', 'betamethasone dipropionate'] },
+  'crysalis':   { type: 'brand', canonical: ['calcipotriol', 'betamethasone dipropionate'] },
+  // Diabétologie / obésité
+  'ozempic':    { type: 'brand', canonical: ['semaglutide'] },
+  'wegovy':     { type: 'brand', canonical: ['semaglutide'] },
+  'trulicity':  { type: 'brand', canonical: ['dulaglutide'] },
+  'victoza':    { type: 'brand', canonical: ['liraglutide'] },
+  'jardiance':  { type: 'brand', canonical: ['empagliflozin'] },
+  'glucophage': { type: 'brand', canonical: ['metformin'] },
+  'lantus':     { type: 'brand', canonical: ['insulin glargine'] },
+  // Cardiovasculaire / anticoagulants
+  'xarelto':    { type: 'brand', canonical: ['rivaroxaban'] },
+  'eliquis':    { type: 'brand', canonical: ['apixaban'] },
+  'pradaxa':    { type: 'brand', canonical: ['dabigatran'] },
+  'plavix':     { type: 'brand', canonical: ['clopidogrel'] },
+  'lipitor':    { type: 'brand', canonical: ['atorvastatin'] },
+  'tahor':      { type: 'brand', canonical: ['atorvastatin'] },
+  'crestor':    { type: 'brand', canonical: ['rosuvastatin'] },
+  'zocor':      { type: 'brand', canonical: ['simvastatin'] },
+  // Respiratoire
+  'ventolin':   { type: 'brand', canonical: ['salbutamol'] },
+  'symbicort':  { type: 'brand', canonical: ['budesonide', 'formoterol'] },
+  'seretide':   { type: 'brand', canonical: ['salmeterol', 'fluticasone'] },
+  // Neurologie / psychiatrie
+  'prozac':     { type: 'brand', canonical: ['fluoxetine'] },
+  'zoloft':     { type: 'brand', canonical: ['sertraline'] },
+  'lexapro':    { type: 'brand', canonical: ['escitalopram'] },
+  'cipralex':   { type: 'brand', canonical: ['escitalopram'] },
+  'xanax':      { type: 'brand', canonical: ['alprazolam'] },
+  'valium':     { type: 'brand', canonical: ['diazepam'] },
+  'temesta':    { type: 'brand', canonical: ['lorazepam'] },
+  // Gastro / PPIs
+  'nexium':     { type: 'brand', canonical: ['esomeprazole'] },
+  'losec':      { type: 'brand', canonical: ['omeprazole'] },
+  'mopral':     { type: 'brand', canonical: ['omeprazole'] },
+  // Antibiotiques / anti-infectieux
+  'zavicefta':  { type: 'brand', canonical: ['ceftazidime', 'avibactam'] },
+  'avycaz':     { type: 'brand', canonical: ['ceftazidime', 'avibactam'] },
+
+  // ── Classes thérapeutiques ────────────────────────────────────────────────
+  // → pas d'analyse directe, on expose les suggestions à l'UI
+  'anti-tnf':            { type: 'class', canonical: [], suggestions: ['adalimumab', 'infliximab', 'etanercept', 'certolizumab', 'golimumab'] },
+  'anti tnf':            { type: 'class', canonical: [], suggestions: ['adalimumab', 'infliximab', 'etanercept', 'certolizumab', 'golimumab'] },
+  'tnf inhibitor':       { type: 'class', canonical: [], suggestions: ['adalimumab', 'infliximab', 'etanercept'] },
+  'tnf inhibitors':      { type: 'class', canonical: [], suggestions: ['adalimumab', 'infliximab', 'etanercept'] },
+  'beta-blocker':        { type: 'class', canonical: [], suggestions: ['metoprolol', 'bisoprolol', 'atenolol', 'carvedilol'] },
+  'beta blocker':        { type: 'class', canonical: [], suggestions: ['metoprolol', 'bisoprolol', 'atenolol', 'carvedilol'] },
+  'beta-blockers':       { type: 'class', canonical: [], suggestions: ['metoprolol', 'bisoprolol', 'atenolol', 'carvedilol'] },
+  'ssri':                { type: 'class', canonical: [], suggestions: ['fluoxetine', 'sertraline', 'escitalopram', 'paroxetine', 'citalopram'] },
+  'ssris':               { type: 'class', canonical: [], suggestions: ['fluoxetine', 'sertraline', 'escitalopram', 'paroxetine'] },
+  'snri':                { type: 'class', canonical: [], suggestions: ['venlafaxine', 'duloxetine', 'desvenlafaxine'] },
+  'snris':               { type: 'class', canonical: [], suggestions: ['venlafaxine', 'duloxetine'] },
+  'nsaid':               { type: 'class', canonical: [], suggestions: ['ibuprofen', 'naproxen', 'diclofenac', 'celecoxib'] },
+  'nsaids':              { type: 'class', canonical: [], suggestions: ['ibuprofen', 'naproxen', 'diclofenac', 'celecoxib'] },
+  'ppi':                 { type: 'class', canonical: [], suggestions: ['omeprazole', 'pantoprazole', 'esomeprazole', 'lansoprazole'] },
+  'ppis':                { type: 'class', canonical: [], suggestions: ['omeprazole', 'pantoprazole', 'esomeprazole'] },
+  'ace inhibitor':       { type: 'class', canonical: [], suggestions: ['ramipril', 'perindopril', 'lisinopril', 'enalapril'] },
+  'ace inhibitors':      { type: 'class', canonical: [], suggestions: ['ramipril', 'perindopril', 'lisinopril', 'enalapril'] },
+  'arb':                 { type: 'class', canonical: [], suggestions: ['losartan', 'valsartan', 'irbesartan', 'candesartan'] },
+  'statin':              { type: 'class', canonical: [], suggestions: ['atorvastatin', 'rosuvastatin', 'simvastatin', 'pravastatin'] },
+  'statins':             { type: 'class', canonical: [], suggestions: ['atorvastatin', 'rosuvastatin', 'simvastatin', 'pravastatin'] },
+  'checkpoint inhibitor':{ type: 'class', canonical: [], suggestions: ['pembrolizumab', 'nivolumab', 'atezolizumab', 'durvalumab'] },
+  'immunosuppressant':   { type: 'class', canonical: [], suggestions: ['azathioprine', 'ciclosporin', 'tacrolimus', 'mycophenolate'] },
+
+};
+
+// Résoudre une entrée brute en substance(s) canonique(s)
+async function resolveInput(raw) {
+  const input   = raw.trim();
+  const key     = stripAccents(input.toLowerCase());
+
+  // 1. Normaliser les séparateurs combo alternatifs (+ / and / &) → slash
+  const keyNorm = key.replace(/\s*[+&]\s*/g, '/').replace(/\s+and\s+/g, '/');
+
+  // 2. Détecter combo issu de séparateur alternatif (pas encore slash dans l'input original)
+  if (!key.includes('/') && keyNorm.includes('/')) {
+    const parts = keyNorm.split('/').map(s => s.trim()).filter(Boolean);
+    return {
+      canonical: parts.join('/'), type: 'combo',
+      displayLabel: parts.join(' + '), aliasesMatched: [], confidence: 'high', warning: null
+    };
+  }
+
+  // 3. Déjà au format combo slash → passer tel quel
+  if (key.includes('/')) {
+    return {
+      canonical: key, type: 'combo',
+      displayLabel: key.split('/').map(s => s.trim()).join(' + '),
+      aliasesMatched: [], confidence: 'high', warning: null
+    };
+  }
+
+  // 4. Lookup dictionnaire (clés normalisées = sans accents, lowercase)
+  const entry = RESOLVER_DICT[key];
+  if (entry) {
+    if (entry.type === 'class') {
+      return {
+        canonical: null, type: 'class', displayLabel: key,
+        aliasesMatched: [], confidence: 'none',
+        warning: 'Classe thérapeutique détectée — précisez une substance active.',
+        suggestions: entry.suggestions || []
+      };
+    }
+    if (entry.type === 'ambiguous') {
+      return {
+        canonical: key, type: 'ambiguous', displayLabel: key,
+        aliasesMatched: [], confidence: 'low',
+        warning: entry.warning || 'Terme ambigu — résultats non garantis.'
+      };
+    }
+    const c = entry.canonical || [];
+    if (c.length === 0) {
+      return { canonical: null, type: entry.type, displayLabel: key, aliasesMatched: [], confidence: 'none', warning: null };
+    }
+    return {
+      canonical:      c.join('/'),
+      type:           entry.type,
+      displayLabel:   c.length > 1 ? c.join(' + ') : c[0],
+      aliasesMatched: [key],
+      confidence:     'high',
+      warning:        null
+    };
+  }
+
+  // 5. RxNorm — résolution dynamique pour les termes inconnus du dictionnaire
+  const rxResult = await resolveViaRxNorm(key);
+  if (rxResult.resolved && rxResult.canonical && rxResult.canonical.length > 0) {
+    const canonStr   = rxResult.canonical.join('/');
+    const isPassthru = rxResult.type === 'passthrough';
+    const label      = rxResult.canonical.length > 1
+      ? rxResult.canonical.join(' + ')
+      : rxResult.canonical[0];
+    console.log('[rxnorm] "' + key + '" → ' + canonStr + ' (' + rxResult.type + ', score=' + rxResult.score + ')');
+    return {
+      canonical:      canonStr,
+      type:           rxResult.type,
+      displayLabel:   label,
+      aliasesMatched: isPassthru ? [] : [key],
+      confidence:     rxResult.confidence,
+      warning: rxResult.confidence === 'medium'
+        ? 'Correspondance approchée via RxNorm — vérifiez la substance.'
+        : null
+    };
+  }
+
+  // 6. Passthrough — comportement actuel préservé (aucune résolution trouvée)
+  return {
+    canonical: key, type: 'passthrough',
+    displayLabel: key, aliasesMatched: [], confidence: 'high', warning: null
+  };
+}
+
 // ─── Handler principal ────────────────────────────────────────────────────────
 exports.handler = async function(event) {
   if (event.httpMethod === 'OPTIONS') {
     return { statusCode: 200, headers: HEADERS, body: '' };
   }
 
-  const rawSubstance = (event.queryStringParameters?.substance || '').trim().toLowerCase();
+  const rawSubstance = (event.queryStringParameters?.substance || '').trim();
   const country      = (event.queryStringParameters?.country   || '').trim().toLowerCase();
 
   if (!rawSubstance) {
     return { statusCode: 400, headers: HEADERS, body: JSON.stringify({ error: 'Substance manquante' }) };
   }
 
+  // ── Résolution de l'entrée utilisateur ───────────────────────────────────
+  const resolved = await resolveInput(rawSubstance);
+  const resolverMeta = (resolved.type !== 'passthrough')
+    ? { type: resolved.type, displayLabel: resolved.displayLabel,
+        aliasesMatched: resolved.aliasesMatched, confidence: resolved.confidence,
+        warning: resolved.warning || null,
+        ...(resolved.suggestions ? { suggestions: resolved.suggestions } : {}) }
+    : null;
+
+  console.log('[resolver] "' + rawSubstance + '" → type=' + resolved.type
+    + ' canonical=' + resolved.canonical + ' confidence=' + resolved.confidence);
+
+  // Classe thérapeutique ou entrée non résoluble → pas d'analyse lancée
+  if (!resolved.canonical) {
+    return {
+      statusCode: 200, headers: HEADERS,
+      body: JSON.stringify({ resolver: resolverMeta, countries: [] })
+    };
+  }
+
   // Gestion des combinaisons A/B (ex: "calcipotriol/betamethasone dipropionate")
-  const { primary: substance, filters: comboFilters } = parseCombo(rawSubstance);
+  const { primary: substance, filters: comboFilters } = parseCombo(resolved.canonical);
   if (comboFilters.length > 0) {
-    console.log('[combo] Recherche "' + rawSubstance + '" → primary="' + substance + '" filters=' + JSON.stringify(comboFilters));
+    console.log('[combo] Recherche "' + resolved.canonical + '" → primary="' + substance + '" filters=' + JSON.stringify(comboFilters));
   }
 
   const SOURCES = {
@@ -896,7 +1228,9 @@ exports.handler = async function(event) {
       };
     }
 
-    return { statusCode: 200, headers: HEADERS, body: JSON.stringify({ countries: [countryData] }) };
+    const responseBody = { countries: [countryData] };
+    if (resolverMeta) responseBody.resolver = resolverMeta;
+    return { statusCode: 200, headers: HEADERS, body: JSON.stringify(responseBody) };
   } catch(err) {
     console.error('[eu-products] Erreur ' + country + '/' + substance + ': ' + err.message);
     return {
