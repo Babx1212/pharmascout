@@ -1282,7 +1282,7 @@ function resetResults() {
 // ------------------------------------------------------------
 // EU PRODUCTS - Fetch generics by territory
 // ------------------------------------------------------------
-async function fetchEUProducts(substance, resolverInfo) {
+async function fetchEUProducts(substance, resolverInfo, analysisId) {
   show('eu-products-loading'); hide('eu-products-content'); hide('eu-products-error'); hide('eu-products-pending');
   try {
     const territories = ['fr','es','pt','be'];
@@ -1317,9 +1317,12 @@ async function fetchEUProducts(substance, resolverInfo) {
       }
     }));
 
+    // Discard if a newer analysis was launched while we were waiting
+    if (analysisId !== _currentAnalysisId) return;
     hide('eu-products-loading');
     renderEUProducts(results, resolverInfo);
   } catch(e) {
+    if (analysisId !== _currentAnalysisId) return;
     hide('eu-products-loading');
     show('eu-products-error');
     document.getElementById('eu-products-error-text').textContent =
@@ -1483,6 +1486,7 @@ function checkReady() {
 // -------------------------------------------------------------------------------------------------------------------
 let rxnormTimer = null;
 let currentSuggestion = null;
+let _currentAnalysisId = 0;  // incremented each analyze() — stale callbacks compare against this
 
 function triggerRxNorm(val) {
   clearTimeout(rxnormTimer);
@@ -1506,10 +1510,10 @@ async function fetchRxNormSuggestions(term) {
     const d = await r.json();
     const suggestions = d.suggestionGroup?.suggestionList?.suggestion || [];
 
-   
- const dropdown = document.getElementById('rxnorm-dropdown');
+    const dropdown = document.getElementById('rxnorm-dropdown');
 
-    if (suggestions.length === 0) {
+    // Guard: no suggestions or first entry is empty (would show "Vouliez-vous dire : ?")
+    if (suggestions.length === 0 || !suggestions[0]) {
       dropdown.style.display = 'none';
       return;
     }
@@ -1994,20 +1998,34 @@ function renderResults() {
   document.getElementById('score-detail').textContent = cp.recDetail;
   document.getElementById('score-date').textContent = 'Analysé le ' + new Date().toLocaleDateString('fr-CH') + ' - ' + new Date().toLocaleTimeString('fr-CH', {hour:'2-digit', minute:'2-digit'});
 
-  // Sub-scores
-  ['safety', 'comp', 'market'].forEach((key, i) => {
-    const scores = [sf.score, cs.score, ms.score];
-    const s = scores[i];
+  // Sub-scores — safety + competition
+  ['safety', 'comp'].forEach((key, i) => {
+    const s = [sf.score, cs.score][i];
     const col = scoreColor(s);
-    document.getElementById(`score-${key}`).textContent = s
-;
+    document.getElementById(`score-${key}`).textContent = s;
     document.getElementById(`score-${key}`).style.color = col;
     const bar = document.getElementById(`bar-${key}`);
     bar.style.width = (s * 10) + '%';
     bar.className = 'sub-kpi-bar-fill';
     bar.style.backgroundColor = col;
   });
-  document.getElementById('market-source-label').textContent = ms.source === 'IQVIA' ? 'Source IQVIA' : 'Score estimé';
+  // Market sub-score: show "—" when no IQVIA data (avoids "Aucune donnée" + "5.0" contradiction)
+  const hasIqvia = ms.source === 'IQVIA';
+  const mktEl = document.getElementById('score-market');
+  const mktBar = document.getElementById('bar-market');
+  if (hasIqvia) {
+    mktEl.textContent = ms.score;
+    mktEl.style.color = scoreColor(ms.score);
+    mktBar.style.width = (ms.score * 10) + '%';
+    mktBar.style.backgroundColor = scoreColor(ms.score);
+  } else {
+    mktEl.textContent = '\u2014'; // em-dash
+    mktEl.style.color = 'var(--text-muted)';
+    mktBar.style.width = '0%';
+    mktBar.style.backgroundColor = 'var(--border)';
+  }
+  mktBar.className = 'sub-kpi-bar-fill';
+  document.getElementById('market-source-label').textContent = hasIqvia ? 'Source IQVIA' : 'Non fourni';
 
   // Radar chart
   if (state.radarChart) state.radarChart.destroy();
@@ -2018,7 +2036,7 @@ function renderResults() {
     data: {
       labels: ['Sécurité', 'Concurrence', 'Marché'],
       datasets: [{
-        data: [sf.score, cs.score, ms.score],
+        data: [sf.score, cs.score, hasIqvia ? ms.score : 0],
         fill: true,
         backgroundColor: 'rgba(59,130,246,0.15)',
         borderColor: 'rgba(59,130,246,0.8)',
@@ -2160,6 +2178,14 @@ async function analyze() {
   let substance = document.getElementById('substance-input').value.trim().toLowerCase();
   if (!substance) return;
 
+  // Symptom 1: cancel pending debounced RxNorm call + hide stale banners
+  clearTimeout(rxnormTimer);
+  document.getElementById('rxnorm-suggestion').style.display = 'none';
+  document.getElementById('rxnorm-dropdown').style.display = 'none';
+
+  // Symptoms 2-5: stamp this analysis — stale async callbacks will self-discard
+  const myId = ++_currentAnalysisId;
+
   document.getElementById('analyze-btn').disabled = true;
 
   // Reset immédiat dès le clic — évite tout affichage résiduel de l'analyse précédente
@@ -2230,9 +2256,9 @@ async function analyze() {
 
     // Lancer EMA + Swissmedic + EU en parallèle (avec substance canonique pour EMA/Swiss)
     setLoading(true, 'Interrogation EMA · Swissmedic · Registres EU…', 88);
-    fetchEMA(canonicalSubstance);            // substance canonique (ex: paracetamol pour dafalgan)
-    fetchSwissmedic(canonicalSubstance);     // idem
-    fetchEUProducts(substance, state.resolverInfo); // eu-products gère sa propre résolution
+    fetchEMA(canonicalSubstance, myId);            // substance canonique (ex: paracetamol pour dafalgan)
+    fetchSwissmedic(canonicalSubstance, myId);     // idem
+    fetchEUProducts(substance, state.resolverInfo, myId); // eu-products gère sa propre résolution
     setLoading(true, 'Calcul des scores…', 95);
     await sleep(150);
 
@@ -2344,14 +2370,17 @@ Ne constitue pas un conseil d'investissement.
 // ----------------------
 // ----------------------------------------------------------------------------------------------------
 
-async function fetchEMA(substance) {
+async function fetchEMA(substance, analysisId) {
   show('ema-loading'); hide('ema-content'); hide('ema-error'); hide('ema-pending');
   try {
     const r = await fetch(`/.netlify/functions/ema?substance=${encodeURIComponent(substance)}`);
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const d = await r.json();
+    // Discard if a newer analysis was launched while we were waiting
+    if (analysisId !== _currentAnalysisId) return;
     renderEMA(d);
   } catch(e) {
+    if (analysisId !== _currentAnalysisId) return;
     hide('ema-loading');
     show('ema-error');
     document.getElementById('ema-error-text').textContent =
@@ -2664,14 +2693,17 @@ function injectEmaFlagsIntoSafety(d) {
   }
 }
 
-async function fetchSwissmedic(substance) {
+async function fetchSwissmedic(substance, analysisId) {
   show('swiss-loading'); hide('swiss-content'); hide('swiss-error'); hide('swiss-pending');
   try {
     const r = await fetch(`/.netlify/functions/swissmedic-v2?substance=${encodeURIComponent(substance)}`);
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const d = await r.json();
+    // Discard if a newer analysis was launched while we were waiting
+    if (analysisId !== _currentAnalysisId) return;
     renderSwissmedic(d);
   } catch(e) {
+    if (analysisId !== _currentAnalysisId) return;
     hide('swiss-loading');
     show('swiss-error');
     document.getElementById('swiss-error-text').textContent =
