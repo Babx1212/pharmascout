@@ -710,19 +710,12 @@ async function fetchSpain(substance) {
 
   const toTitle = s => s.replace(/\b\w/g, c => c.toUpperCase());
   // Variantes ES : lowercase, Titlecase, UPPERCASE + adaptation DCI espagnole
-  // CIMA utilise les DCI espagnoles accentuées (ex. prilocaína, lidocaína, betametasona)
-  // Adaptation courante : fin anglaise -aine/-ine → finale espagnole -aína/-ina
-  const toEsVariant = s => {
-    const low = s.toLowerCase();
-    if (/aine$/.test(low)) return low.replace(/aine$/, 'aína');
-    if (/ine$/.test(low) && !/medicine$|fluorine$/.test(low)) return low.replace(/ine$/, 'ina');
-    if (/one$/.test(low)) return low.replace(/one$/, 'ona');
-    if (/ide$/.test(low)) return low.replace(/ide$/, 'ido');
-    return '';
-  };
-  const esVariant = toEsVariant(substance);
+  // CIMA utilise les DCI espagnoles : la majorité des DCI anglaises en -e finissent en -a
+  // finasteride→finasterida, prilocaine→prilocaina, betamethasone→betamethasona, etc.
+  const low = substance.toLowerCase();
+  const esVariant = (low.length > 4 && low.endsWith('e')) ? low.slice(0, -1) + 'a' : '';
   const variants = [...new Set([
-    substance.toLowerCase(),
+    low,
     toTitle(substance),
     substance.toUpperCase(),
     ...(esVariant ? [esVariant, toTitle(esVariant)] : [])
