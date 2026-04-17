@@ -1137,15 +1137,28 @@ exports.handler = async function(event) {
 
   // ── Résolution de l'entrée utilisateur ───────────────────────────────────
   const resolved = await resolveInput(rawSubstance);
-  const resolverMeta = (resolved.type !== 'passthrough')
-    ? { type: resolved.type, displayLabel: resolved.displayLabel,
-        aliasesMatched: resolved.aliasesMatched, confidence: resolved.confidence,
-        warning: resolved.warning || null,
-        ...(resolved.suggestions ? { suggestions: resolved.suggestions } : {}) }
-    : null;
+
+  // Objet complet (toujours rempli, même pour passthrough) — utilisé par resolve_only
+  const resolverFull = {
+    type:          resolved.type,
+    canonical:     resolved.canonical,
+    displayLabel:  resolved.displayLabel || resolved.canonical || rawSubstance,
+    aliasesMatched:resolved.aliasesMatched || [],
+    confidence:    resolved.confidence || 'high',
+    warning:       resolved.warning || null,
+    ...(resolved.suggestions ? { suggestions: resolved.suggestions } : {})
+  };
+
+  // resolverMeta est null pour les passthroughs (rétro-compat JSON réponse normale)
+  const resolverMeta = (resolved.type !== 'passthrough') ? resolverFull : null;
 
   console.log('[resolver] "' + rawSubstance + '" → type=' + resolved.type
     + ' canonical=' + resolved.canonical + ' confidence=' + resolved.confidence);
+
+  // ── Mode resolve_only : retourner uniquement la résolution, sans appels réseau ──
+  if (event.queryStringParameters?.resolve_only === '1') {
+    return { statusCode: 200, headers: HEADERS, body: JSON.stringify({ resolver: resolverFull }) };
+  }
 
   // Classe thérapeutique ou entrée non résoluble → pas d'analyse lancée
   if (!resolved.canonical) {
