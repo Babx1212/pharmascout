@@ -1057,21 +1057,28 @@
         <div class="tab-pane fade" id="tab-comp">
 
           <div class="row g-2 mb-3">
-            <div class="col-4">
+            <div class="col-3">
               <div class="metric-box">
                 <div class="metric-value" id="m-generics">-</div>
                 <div class="metric-label">Génériques approuvés</div>
                 <div class="metric-sub">FDA (ANDAs)</div>
               </div>
             </div>
-            <div class="col-4">
+            <div class="col-3">
               <div class="metric-box">
                 <div class="metric-value" id="m-nda">-</div>
                 <div class="metric-label">Produits originaux</div>
                 <div class="metric-sub">FDA (NDAs)</div>
               </div>
             </div>
-            <div class="col-4">
+            <div class="col-3">
+              <div class="metric-box">
+                <div class="metric-value sm" id="m-territorial">-</div>
+                <div class="metric-label">Présence EU</div>
+                <div class="metric-sub">marchés couverts</div>
+              </div>
+            </div>
+            <div class="col-3">
               <div class="metric-box">
                 <div class="metric-value sm" id="m-comp-level">-</div>
                 <div class="metric-label">Niveau concurrence</div>
@@ -1215,7 +1222,7 @@ function resetResults() {
 
   // Reset metric boxes
   ['m-total','m-deaths','m-pubmed-safety','m-pubmed-recent',
-   'm-generics','m-nda','m-comp-level','m-ema-prac-safety','m-swiss-pv-safety'].forEach(id => {
+   'm-generics','m-nda','m-comp-level','m-territorial','m-ema-prac-safety','m-swiss-pv-safety'].forEach(id => {
     const el = document.getElementById(id);
     if (el) { el.textContent = '-'; el.style.color = ''; }
   });
@@ -1295,7 +1302,7 @@ function resetResults() {
 async function fetchEUProducts(substance, resolverInfo, analysisId) {
   show('eu-products-loading'); hide('eu-products-content'); hide('eu-products-error'); hide('eu-products-pending');
   try {
-    const territories = ['fr','es','pt','be'];
+    const territories = ['fr','es','pt','be','de','it'];
     const results = {};
 
     // Helper: fetch one country with up to 3 attempts (handles cold-start 502s)
@@ -1333,14 +1340,15 @@ async function fetchEUProducts(substance, resolverInfo, analysisId) {
     hide('eu-products-pending');   // belt-and-suspenders
     renderEUProducts(results, resolverInfo);
 
-    // Recalculer score compétition avec données EU (FDA 40% + EU 60%)
+    // Recalculer score compétition avec données EU (FDA 30% + EU volume 40% + territorial 30%)
     const euTotal = Object.values(results).reduce((sum, r) => sum + (r.total || (r.products || []).length), 0);
     state.euProductsCount = euTotal;
+    state.euTerritorialData = calcTerritorial(results);
     if (state.generics && state.safetyScore && state.marketScore) {
       const ws = parseInt(document.getElementById('w-safety').value);
       const wc = parseInt(document.getElementById('w-comp').value);
       const wm = parseInt(document.getElementById('w-market').value);
-      state.competitionScore = calcCompetition(state.generics, state.euProductsCount);
+      state.competitionScore = calcCompetition(state.generics, state.euProductsCount, state.euTerritorialData);
       state.composite = calcComposite(state.safetyScore, state.competitionScore, state.marketScore, ws, wc, wm);
       const cs = state.competitionScore;
       const cp = state.composite;
@@ -1359,6 +1367,8 @@ async function fetchEUProducts(substance, resolverInfo, analysisId) {
       if (mGen) mGen.textContent = cs.n + (cs.euN != null ? ` FDA · ${cs.euN} EU` : '');
       const mLevel = document.getElementById('m-comp-level');
       if (mLevel) mLevel.textContent = cs.level;
+      const mTerr = document.getElementById('m-territorial');
+      if (mTerr && cs.territorial) mTerr.textContent = `${cs.territorial.covered}/${cs.territorial.total}`;
     }
   } catch(e) {
     if (analysisId !== _currentAnalysisId) return;
@@ -1376,7 +1386,9 @@ const TERRITORY_LABELS = {
   fr: { name: 'France', flag: '🇫🇷', source: 'BDPM / ANSM' },
   es: { name: 'Espagne', flag: '🇪🇸', source: 'CIMA / AEMPS' },
   pt: { name: 'Portugal', flag: '🇵🇹', source: 'INFARMED' },
-  be: { name: 'Belgique', flag: '🇧🇪', source: 'SAM / CBIP' }
+  be: { name: 'Belgique', flag: '🇧🇪', source: 'SAM / CBIP' },
+  de: { name: 'Allemagne', flag: '🇩🇪', source: 'Gelbe Liste / BfArM' },
+  it: { name: 'Italie', flag: '🇮🇹', source: 'AIFA' }
 };
 
 function renderEUProducts(results, resolverInfo) {
@@ -1498,6 +1510,7 @@ let state = {
   marketScore: null,
   composite: null,
   euProductsCount: null,
+  euTerritorialData: null,
   radarChart: null,
   emaSignal: null,       // pvSignal EMA (safety|prac|psusa|dhpc|historical|none)
   swissPvAlert: false,   // alert pharmacovigilance Swissmedic
@@ -1950,7 +1963,25 @@ function calcSafety(faers, pubmed, emaSignal, swissPvAlert) {
   };
 }
 
-function calcCompetition(gen, euProductsCount) {
+// Calcule le score de couverture territoriale EU (1-10, où 10 = aucune présence = opportunité max)
+// N'utilise que les territoires où nous avons des données réelles (pas de note "pas d'API").
+function calcTerritorial(results) {
+  if (!results) return null;
+  const dataTerrits = Object.entries(results).filter(([k, v]) => !v.note && !v.error);
+  if (dataTerrits.length === 0) return null;
+  const covered = dataTerrits.filter(([k, v]) => (v.total || (v.products || []).length) > 0).length;
+  const total   = dataTerrits.length;
+  const pct     = covered / total;
+  let score;
+  if (pct === 0)        score = 9.5;  // Aucune présence EU → opportunité maximale
+  else if (pct <= 0.25) score = 8.0;  // 1 territoire sur 4+
+  else if (pct <= 0.50) score = 6.5;  // 2 sur 4
+  else if (pct <= 0.75) score = 4.5;  // 3 sur 4
+  else                  score = 2.5;  // Tous les territoires couverts → marché saturé
+  return { score, covered, total, pct };
+}
+
+function calcCompetition(gen, euProductsCount, territorial) {
   const n = gen.genericApprovals;
 
   // Score FDA (Orange Book ANDAs)
@@ -1965,17 +1996,25 @@ function calcCompetition(gen, euProductsCount) {
   let score = fdaScore;
   let euN = null;
 
-  // Si données EU disponibles : pondération FDA 40% + EU 60%
-  if (euProductsCount != null) {
+  // Score EU par volume de produits
+  function euVolumeScore(euCount) {
+    if (euCount === 0)       return 9.0;
+    else if (euCount <= 5)   return 8.5;
+    else if (euCount <= 15)  return 7.0;
+    else if (euCount <= 30)  return 5.0;
+    else if (euCount <= 60)  return 3.0;
+    else                     return 1.5;
+  }
+
+  if (euProductsCount != null && territorial != null) {
+    // Données EU + couverture territoriale disponibles : FDA 30% + volume EU 40% + territorial 30%
     euN = euProductsCount;
-    let euScore;
-    if (euN === 0)       euScore = 9.0;
-    else if (euN <= 5)   euScore = 8.5;
-    else if (euN <= 15)  euScore = 7.0;
-    else if (euN <= 30)  euScore = 5.0;
-    else if (euN <= 60)  euScore = 3.0;
-    else                 euScore = 1.5;
-    score = Math.round((fdaScore * 0.40 + euScore * 0.60) * 10) / 10;
+    const euScore = euVolumeScore(euN);
+    score = Math.round((fdaScore * 0.30 + euScore * 0.40 + territorial.score * 0.30) * 10) / 10;
+  } else if (euProductsCount != null) {
+    // Données EU disponibles sans territorial : FDA 40% + volume EU 60%
+    euN = euProductsCount;
+    score = Math.round((fdaScore * 0.40 + euVolumeScore(euN) * 0.60) * 10) / 10;
   }
 
   let level, emoji;
@@ -1995,7 +2034,7 @@ function calcCompetition(gen, euProductsCount) {
     else               level = 'Marché saturé – nombreux génériques (FDA)';
   }
 
-  return { score, n, euN, nda: gen.ndaApprovals, level, emoji, manufacturers: gen.manufacturers, originators: gen.originators || [] };
+  return { score, n, euN, nda: gen.ndaApprovals, level, emoji, manufacturers: gen.manufacturers, originators: gen.originators || [], territorial };
 }
 
 function calcMarket(iqvia) {
@@ -2032,7 +2071,7 @@ function updateScoreWithContext() {
   const wc = parseInt(document.getElementById('w-comp').value);
   const wm = parseInt(document.getElementById('w-market').value);
   state.safetyScore = calcSafety(state.faers, state.pubmed, state.emaSignal, state.swissPvAlert);
-  state.competitionScore = calcCompetition(state.generics, state.euProductsCount);
+  state.competitionScore = calcCompetition(state.generics, state.euProductsCount, state.euTerritorialData);
   state.composite = calcComposite(state.safetyScore, state.competitionScore, state.marketScore, ws, wc, wm);
   // Mise à jour du score banner (sécurité + composite uniquement)
   const sf = state.safetyScore;
@@ -2263,6 +2302,7 @@ function renderResults() {
   document.getElementById('m-generics').textContent = cs.n;
   document.getElementById('m-nda').textContent = cs.nda;
   document.getElementById('m-comp-level').textContent = cs.emoji + ' ' + cs.level;
+  { const el = document.getElementById('m-territorial'); if(el) el.textContent = cs.territorial ? `${cs.territorial.covered}/${cs.territorial.total}` : '—'; }
   // Originator / reference products
   if (cs.originators && cs.originators.length > 0) {
     document.getElementById('originator-section').style.display = 'block';
@@ -2405,7 +2445,8 @@ async function analyze() {
     state.pubmed   = pubmedResult.status   === 'fulfilled' ? pubmedResult.value   : { totalPublications: 0, safetyPublications: 0, recentSafetyPublications: 0 };
 
     state.iqvia = null;
-    state.euProductsCount = null; // reset EU count — sera recalculé après fetchEUProducts
+    state.euProductsCount = null;      // reset EU count — sera recalculé après fetchEUProducts
+    state.euTerritorialData = null;    // reset territorial — sera recalculé après fetchEUProducts
     if (iqviaFile) {
       setLoading(true, '📊 Analyse du fichier IQVIA...', 78);
       state.iqvia = await parseIQVIA(iqviaFile);
@@ -2424,7 +2465,7 @@ async function analyze() {
     const wm = parseInt(document.getElementById('w-market').value);
 
     state.safetyScore = calcSafety(state.faers, state.pubmed, null, false);
-    state.competitionScore = calcCompetition(state.generics, state.euProductsCount);
+    state.competitionScore = calcCompetition(state.generics, state.euProductsCount, state.euTerritorialData);
     state.marketScore = calcMarket(state.iqvia);
     state.composite = calcComposite(state.safetyScore, state.competitionScore, state.marketScore, ws, wc, wm);
 

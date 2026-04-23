@@ -37,7 +37,9 @@ const COUNTRY_LINKS = {
   fr: 'https://base-donnees-publique.medicaments.gouv.fr/',
   es: 'https://cima.aemps.es/cima/publico/home.html',
   pt: 'https://extranet.infarmed.pt/INFOMED-fo/',
-  be: 'https://medicinesdatabase.be/human-use'
+  be: 'https://medicinesdatabase.be/human-use',
+  de: 'https://www.gelbe-liste.de/',
+  it: 'https://farmaci.agenziafarmaco.gov.it/'
 };
 
 // ─── Cache session BDPM (cookie PHP de session, 25 min) ──────────────────────
@@ -698,6 +700,20 @@ async function fetchBelgium(substance) {
   return products;
 }
 
+// ─── Allemagne — Gelbe Liste / BfArM ─────────────────────────────────────────
+// Gelbe Liste n'expose pas d'API publique JSON documentée.
+// La base officielle BfArM/ABDA est uniquement disponible via abonnement professionnel.
+async function fetchGermany(substance) {
+  return null; // Pas d'API publique — renvoie note avec lien officiel
+}
+
+// ─── Italie — AIFA Banca Dati Farmaci ────────────────────────────────────────
+// AIFA ne fournit pas d'API REST publique documentée pour la recherche par substance active.
+// Les données Open Data AIFA sont disponibles uniquement par téléchargement mensuel.
+async function fetchItaly(substance) {
+  return null; // Pas d'API publique — renvoie note avec lien officiel
+}
+
 // ─── Espagne — CIMA REST API v1.23 ───────────────────────────────────────────
 // Tente lowercase, Titlecase, UPPERCASE si 0 résultat (CIMA est case-sensitive)
 async function fetchSpain(substance) {
@@ -1178,7 +1194,9 @@ exports.handler = async function(event) {
     fr: { label: 'BDPM / ANSM',              fetch: () => fetchFrance(substance)    },
     es: { label: 'CIMA / AEMPS',             fetch: () => fetchSpain(substance)     },
     pt: { label: 'INFARMED',                 fetch: () => fetchPortugal(substance)  },
-    be: { label: 'medicinesdatabase / FAMHP', fetch: () => fetchBelgium(substance)  }
+    be: { label: 'medicinesdatabase / FAMHP', fetch: () => fetchBelgium(substance)  },
+    de: { label: 'Gelbe Liste / BfArM',       fetch: () => fetchGermany(substance)  },
+    it: { label: 'AIFA',                      fetch: () => fetchItaly(substance)    }
   };
 
   const meta = SOURCES[country];
