@@ -1323,6 +1323,34 @@ async function fetchEUProducts(substance, resolverInfo, analysisId) {
     hide('eu-products-loading');
     hide('eu-products-pending');   // belt-and-suspenders
     renderEUProducts(results, resolverInfo);
+
+    // Recalculer score compétition avec données EU (FDA 40% + EU 60%)
+    const euTotal = Object.values(results).reduce((sum, r) => sum + (r.total || (r.products || []).length), 0);
+    state.euProductsCount = euTotal;
+    if (state.generics && state.safetyScore && state.marketScore) {
+      const ws = parseInt(document.getElementById('w-safety').value);
+      const wc = parseInt(document.getElementById('w-comp').value);
+      const wm = parseInt(document.getElementById('w-market').value);
+      state.competitionScore = calcCompetition(state.generics, state.euProductsCount);
+      state.composite = calcComposite(state.safetyScore, state.competitionScore, state.marketScore, ws, wc, wm);
+      const cs = state.competitionScore;
+      const cp = state.composite;
+      // Mise à jour partielle : compétition + composite
+      const scoreComp = document.getElementById('score-comp');
+      if (scoreComp) { scoreComp.textContent = cs.score; scoreComp.style.color = scoreColor(cs.score); }
+      const barComp = document.getElementById('bar-comp');
+      if (barComp) { barComp.style.width = (cs.score * 10) + '%'; barComp.style.backgroundColor = scoreColor(cs.score); }
+      const scoreNum = document.getElementById('score-number');
+      if (scoreNum) { scoreNum.textContent = cp.score; scoreNum.style.color = cp.recColor; }
+      const scoreRec = document.getElementById('score-rec');
+      if (scoreRec) scoreRec.textContent = cp.rec;
+      const scoreDetail = document.getElementById('score-detail');
+      if (scoreDetail) scoreDetail.textContent = cp.recDetail;
+      const mGen = document.getElementById('m-generics');
+      if (mGen) mGen.textContent = cs.n + (cs.euN != null ? ` FDA · ${cs.euN} EU` : '');
+      const mLevel = document.getElementById('m-comp-level');
+      if (mLevel) mLevel.textContent = cs.level;
+    }
   } catch(e) {
     if (analysisId !== _currentAnalysisId) return;
     hide('eu-products-loading');
@@ -1460,6 +1488,7 @@ let state = {
   competitionScore: null,
   marketScore: null,
   composite: null,
+  euProductsCount: null,
   radarChart: null,
   emaSignal: null,       // pvSignal EMA (safety|prac|psusa|dhpc|historical|none)
   swissPvAlert: false,   // alert pharmacovigilance Swissmedic
@@ -1861,6 +1890,12 @@ function calcSafety(faers, pubmed, emaSignal, swissPvAlert) {
   } else if (emaSignal === 'prac') {
     score -= 0.5;
     flags.push({ level:'warning', emoji:'🟡', text:'Procédure EMA (PRAC) active', detail:'Referral en cours — statut à surveiller' });
+  } else if (emaSignal === 'psusa') {
+    score -= 0.75;
+    flags.push({ level:'warning', emoji:'🟡', text:'PSUSA actif (EMA)', detail:'Réévaluation périodique du rapport bénéfice/risque en cours' });
+  } else if (emaSignal === 'dhpc') {
+    score -= 0.25;
+    flags.push({ level:'info', emoji:'ℹ️', text:'DHPC disponible (EMA)', detail:'Communication directe aux professionnels de santé publiée récemment' });
   }
   // Pénalité légère Swissmedic Vigilance News
   if (swissPvAlert) {
@@ -1906,16 +1941,52 @@ function calcSafety(faers, pubmed, emaSignal, swissPvAlert) {
   };
 }
 
-function calcCompetition(gen) {
+function calcCompetition(gen, euProductsCount) {
   const n = gen.genericApprovals;
-  let score, level, emoji;
-  if (n === 0)       { score=9.0; level='Marché non encore générifié (FDA)'; emoji='🟢'; }
-  else if (n <= 2)   { score=8.0; level='Très peu de concurrents génériques'; emoji='🟡'; }
-  else if (n <= 5)   { score=6.5; level='Concurrence modérée'; emoji='🟡'; }
-  else if (n <= 10)  { score=4.5; level='Marché compétitif'; emoji='🟠'; }
-  else if (n <= 20)  { score=2.5; level='Marché très compétitif'; emoji='🔴'; }
-  else               { score=1.0; level='Marché saturé – nombreux génériques'; emoji='🔴'; }
-  return { score, n, nda: gen.ndaApprovals, level, emoji, manufacturers: gen.manufacturers, originators: gen.originators || [] };
+
+  // Score FDA (Orange Book ANDAs)
+  let fdaScore;
+  if (n === 0)       fdaScore = 9.0;
+  else if (n <= 2)   fdaScore = 8.0;
+  else if (n <= 5)   fdaScore = 6.5;
+  else if (n <= 10)  fdaScore = 4.5;
+  else if (n <= 20)  fdaScore = 2.5;
+  else               fdaScore = 1.0;
+
+  let score = fdaScore;
+  let euN = null;
+
+  // Si données EU disponibles : pondération FDA 40% + EU 60%
+  if (euProductsCount != null) {
+    euN = euProductsCount;
+    let euScore;
+    if (euN === 0)       euScore = 9.0;
+    else if (euN <= 5)   euScore = 8.5;
+    else if (euN <= 15)  euScore = 7.0;
+    else if (euN <= 30)  euScore = 5.0;
+    else if (euN <= 60)  euScore = 3.0;
+    else                 euScore = 1.5;
+    score = Math.round((fdaScore * 0.40 + euScore * 0.60) * 10) / 10;
+  }
+
+  let level, emoji;
+  if (score >= 8.0)      { level='Marché peu concurrentiel (EU+FDA)'; emoji='🟢'; }
+  else if (score >= 6.0) { level='Concurrence modérée (EU+FDA)'; emoji='🟡'; }
+  else if (score >= 4.0) { level='Marché compétitif (EU+FDA)'; emoji='🟠'; }
+  else if (score >= 2.0) { level='Marché très compétitif (EU+FDA)'; emoji='🔴'; }
+  else                   { level='Marché saturé – nombreux génériques'; emoji='🔴'; }
+
+  // Fallback label si pas encore de données EU
+  if (euN === null) {
+    if (n === 0)       level = 'Marché non encore générifié (FDA)';
+    else if (n <= 2)   level = 'Très peu de concurrents génériques (FDA)';
+    else if (n <= 5)   level = 'Concurrence modérée (FDA)';
+    else if (n <= 10)  level = 'Marché compétitif (FDA)';
+    else if (n <= 20)  level = 'Marché très compétitif (FDA)';
+    else               level = 'Marché saturé – nombreux génériques (FDA)';
+  }
+
+  return { score, n, euN, nda: gen.ndaApprovals, level, emoji, manufacturers: gen.manufacturers, originators: gen.originators || [] };
 }
 
 function calcMarket(iqvia) {
@@ -1952,6 +2023,7 @@ function updateScoreWithContext() {
   const wc = parseInt(document.getElementById('w-comp').value);
   const wm = parseInt(document.getElementById('w-market').value);
   state.safetyScore = calcSafety(state.faers, state.pubmed, state.emaSignal, state.swissPvAlert);
+  state.competitionScore = calcCompetition(state.generics, state.euProductsCount);
   state.composite = calcComposite(state.safetyScore, state.competitionScore, state.marketScore, ws, wc, wm);
   // Mise à jour du score banner (sécurité + composite uniquement)
   const sf = state.safetyScore;
@@ -1980,9 +2052,15 @@ function updateScoreWithContext() {
 }
 
 function calcComposite(safety, comp, market, ws, wc, wm) {
-  const total = ws + wc + wm;
-  ws /= total; wc /= total; wm /= total;
-  const score = Math.round((safety.score*ws + comp.score*wc + market.score*wm) * 10) / 10;
+  // Sans données IQVIA : exclure le marché du composite, renormaliser sur safety + comp uniquement
+  let score;
+  if (!market || market.source !== 'IQVIA') {
+    const total2 = ws + wc;
+    score = Math.round((safety.score * (ws / total2) + comp.score * (wc / total2)) * 10) / 10;
+  } else {
+    const total = ws + wc + wm;
+    score = Math.round((safety.score * (ws / total) + comp.score * (wc / total) + market.score * (wm / total)) * 10) / 10;
+  }
   let rec, recColor, recDetail;
   if (score >= 7.5)      { rec='✅ RECOMMANDÉ';         recColor='#10b981'; recDetail='Profil d\'investissement attractif'; }
   else if (score >= 5.5) { rec='⚠️ ÉVALUER';            recColor='#f59e0b'; recDetail='Potentiel modéré – approfondissement recommandé'; }
@@ -2034,7 +2112,7 @@ function renderResults() {
     mktBar.style.backgroundColor = 'var(--border)';
   }
   mktBar.className = 'sub-kpi-bar-fill';
-  document.getElementById('market-source-label').textContent = hasIqvia ? 'Source IQVIA' : 'Non fourni';
+  document.getElementById('market-source-label').textContent = hasIqvia ? 'Source IQVIA' : 'Non fourni — exclu du composite';
 
   // Radar chart
   if (state.radarChart) state.radarChart.destroy();
@@ -2260,6 +2338,7 @@ async function analyze() {
     state.pubmed   = pubmedResult.status   === 'fulfilled' ? pubmedResult.value   : { totalPublications: 0, safetyPublications: 0, recentSafetyPublications: 0 };
 
     state.iqvia = null;
+    state.euProductsCount = null; // reset EU count — sera recalculé après fetchEUProducts
     if (iqviaFile) {
       setLoading(true, '📊 Analyse du fichier IQVIA...', 78);
       state.iqvia = await parseIQVIA(iqviaFile);
@@ -2278,7 +2357,7 @@ async function analyze() {
     const wm = parseInt(document.getElementById('w-market').value);
 
     state.safetyScore = calcSafety(state.faers, state.pubmed, null, false);
-    state.competitionScore = calcCompetition(state.generics);
+    state.competitionScore = calcCompetition(state.generics, state.euProductsCount);
     state.marketScore = calcMarket(state.iqvia);
     state.composite = calcComposite(state.safetyScore, state.competitionScore, state.marketScore, ws, wc, wm);
 
