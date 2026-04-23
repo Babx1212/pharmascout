@@ -39,7 +39,11 @@ const COUNTRY_LINKS = {
   pt: 'https://extranet.infarmed.pt/INFOMED-fo/',
   be: 'https://medicinesdatabase.be/human-use',
   de: 'https://www.gelbe-liste.de/',
-  it: 'https://farmaci.agenziafarmaco.gov.it/'
+  it: 'https://medicinali.aifa.gov.it/',
+  nl: 'https://db.cbg-meb.nl/ords/f?p=111:1',
+  at: 'https://medikamente.basg.gv.at/',
+  se: 'https://www.lakemedelsverket.se/en/medicines-and-products/medicines/medicines-database',
+  pl: 'https://rejestry.ezdrowie.gov.pl/rpl/search-product'
 };
 
 // ─── Cache session BDPM (cookie PHP de session, 25 min) ──────────────────────
@@ -134,6 +138,16 @@ function httpGetWithHeaders(url, timeoutMs) {
 async function httpGetJson(url, timeoutMs, extraHeaders) {
   const buf = await httpGet(url, timeoutMs, extraHeaders);
   return JSON.parse(buf.toString('utf8'));
+}
+
+// ─── Helper : POST JSON body + retourner JSON ─────────────────────────────────
+async function httpPostJson(url, body, timeoutMs, extraHeaders) {
+  const bodyStr = JSON.stringify(body);
+  const rawStr  = await httpPostRaw(url, bodyStr, timeoutMs, Object.assign({
+    'Content-Type': 'application/json',
+    'Accept':       'application/json, */*'
+  }, extraHeaders || {}));
+  return JSON.parse(rawStr);
 }
 
 // ─── Helper : GET retournant {statusCode, headers, body:string} ───────────────
@@ -708,10 +722,215 @@ async function fetchGermany(substance) {
 }
 
 // ─── Italie — AIFA Banca Dati Farmaci ────────────────────────────────────────
-// AIFA ne fournit pas d'API REST publique documentée pour la recherche par substance active.
-// Les données Open Data AIFA sont disponibles uniquement par téléchargement mensuel.
+// Nouveau domaine SPA : medicinali.aifa.gov.it (Angular)
+// API REST découverte : https://api.aifa.gov.it/aifa-bdf-eif-be/1.0.0/
+// Étape 1 : autocomplete?query={term}&nos=5 → DCI en italien (PARACETAMOLO etc.)
+// Étape 2 : formadosaggio/ricerca?query={dci-it}&spellingCorrection=false&page=0&size=100
+//   Réponse : {data:{content:[{medicinale:{denominazioneMedicinale,aziendaTitolare,...},revocato,sospeso,confezioni:[{flagCommercio}]}],...}}
 async function fetchItaly(substance) {
-  return null; // Pas d'API publique — renvoie note avec lien officiel
+  const BASE  = 'https://api.aifa.gov.it/aifa-bdf-eif-be/1.0.0';
+  const EXTRA = {
+    'Accept':  'application/json',
+    'Origin':  'https://medicinali.aifa.gov.it',
+    'Referer': 'https://medicinali.aifa.gov.it/'
+  };
+
+  // ── Étape 1 : nom DCI en italien ──────────────────────────────────────────
+  let italianName = substance.toUpperCase();
+  try {
+    const autoUrl = BASE + '/autocomplete?query=' + encodeURIComponent(substance) + '&nos=5';
+    const suggestions = await httpGetJson(autoUrl, 8000, EXTRA);
+    if (Array.isArray(suggestions) && suggestions.length > 0) {
+      const pa = suggestions.find(s => typeof s === 'string' && s.includes('(PRINCIPIO ATTIVO)'));
+      if (pa)                            italianName = pa.split('(')[0].trim();
+      else if (typeof suggestions[0] === 'string') italianName = suggestions[0].split('(')[0].trim();
+      console.log('[AIFA] DCI italienne: ' + italianName + ' (recherche: ' + substance + ')');
+    }
+  } catch(e) {
+    console.warn('[AIFA] autocomplete error: ' + e.message);
+  }
+
+  // ── Étape 2 : recherche paginée ───────────────────────────────────────────
+  const allProducts = [];
+  let page = 0, totalPages = 1;
+
+  while (page < totalPages && page < 5) {
+    const searchUrl = BASE + '/formadosaggio/ricerca'
+      + '?query=' + encodeURIComponent(italianName)
+      + '&spellingCorrection=false'
+      + '&page=' + page + '&size=100';
+
+    const data = await httpGetJson(searchUrl, 12000, EXTRA);
+    if (!data || !data.data || !Array.isArray(data.data.content)) break;
+
+    totalPages = data.data.totalPages || 1;
+
+    for (const item of data.data.content) {
+      const med  = item.medicinale || {};
+      const name = med.denominazioneMedicinale || '';
+      if (!name) continue;
+
+      let status = 'Autorizzato';
+      if (item.revocato)     status = 'Revocato';
+      else if (item.sospeso) status = 'Sospeso';
+      else {
+        const confezioni = item.confezioni || [];
+        const inCommercio = confezioni.some(c =>
+          c.flagCommercio === true || c.flagCommercio === 'true' || c.flagCommercio === 1);
+        if (confezioni.length > 0 && !inCommercio) status = 'Non in commercio';
+      }
+      allProducts.push({ name, holder: med.aziendaTitolare || '', status });
+    }
+    page++;
+  }
+
+  console.log('[AIFA] ' + allProducts.length + ' produits pour: ' + substance);
+  return allProducts;
+}
+
+// ─── Pays-Bas — CBG-MEB (Oracle APEX, HTML parsing) ──────────────────────────
+// Base Geneesmiddelen Databank : db.cbg-meb.nl/ords/f?p=111:2
+// Recherche par werkzame stof (substance active) — APEX LOV : \VALUE\ (backslash-enclosed)
+// Le tableau HTML Classic Report renvoie : Registratienummer | Productnaam | ATC | Werkzame stof
+// Pas de titulaire dans la vue liste ; status = "Geregistreerd"
+async function fetchNetherlands(substance) {
+  const subUpper = substance.toUpperCase();
+  // Oracle APEX LOV format : \VALUE\ → URL-encoded → %5CVALUE%5C
+  const subEnc = '%5C' + encodeURIComponent(subUpper) + '%5C';
+
+  const url = 'https://db.cbg-meb.nl/ords/f?p=111:2::SEARCH::2:'
+    + 'P2_WERKZAAMSTOFFEN,P2_TAAL,P2_SOORT,P2_RIJEN:'
+    + subEnc + ',NL,H,100';
+
+  const raw = await httpGetRaw(url, 15000, {
+    'Accept':          'text/html,application/xhtml+xml,*/*',
+    'Accept-Language': 'nl-NL,nl;q=0.9,en;q=0.8',
+    'Referer':         'https://db.cbg-meb.nl/ords/f?p=111:1'
+  });
+
+  if (raw.statusCode < 200 || raw.statusCode >= 300) {
+    console.warn('[CBG-MEB] HTTP ' + raw.statusCode + ' pour: ' + substance);
+    return null;
+  }
+
+  // Parser les lignes <tr>/<td> du Classic Report APEX
+  const products = [];
+  const html     = raw.body;
+  const stripHtml = s => s
+    .replace(/<[^>]+>/g, '')
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&nbsp;/g, ' ').replace(/&#\d+;/g, '').trim();
+
+  const rowRe = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+  let rowMatch;
+  while ((rowMatch = rowRe.exec(html)) !== null) {
+    const rowHtml = rowMatch[1];
+    // Ignorer les lignes d'en-tête (contiennent <th> mais pas <td>)
+    if (!rowHtml.includes('<td')) continue;
+    const cells = [];
+    const cellRe = /<td[^>]*>([\s\S]*?)<\/td>/gi;
+    let cm;
+    while ((cm = cellRe.exec(rowHtml)) !== null) cells.push(stripHtml(cm[1]));
+    if (cells.length < 2) continue;
+    const name = cells[1] || '';
+    if (!name || name === 'Productnaam') continue;
+    products.push({ name, holder: '', status: 'Geregistreerd' });
+  }
+
+  console.log('[CBG-MEB] ' + products.length + ' produits pour: ' + substance);
+  return products.length > 0 ? products : [];
+}
+
+// ─── Autriche — BASG Arzneimittel-Datenbank ──────────────────────────────────
+// SPA Angular medikamente.basg.gv.at — API REST découverte
+// POST /api/api/v1/medication/search?page=1&size=100 avec body {substance: term}
+async function fetchAustria(substance) {
+  const url  = 'https://medikamente.basg.gv.at/api/api/v1/medication/search?page=1&size=100';
+  const body = { substance };
+
+  const data = await httpPostJson(url, body, 12000, {
+    'Origin':  'https://medikamente.basg.gv.at',
+    'Referer': 'https://medikamente.basg.gv.at/'
+  });
+
+  // Normaliser selon la structure de réponse (tableau direct ou enveloppé)
+  const items = Array.isArray(data) ? data
+    : (data && Array.isArray(data.content)) ? data.content
+    : (data && Array.isArray(data.data))    ? data.data
+    : (data && Array.isArray(data.results)) ? data.results
+    : [];
+
+  const products = items.map(item => ({
+    name:   item.name || item.bezeichnung || item.productName || item.tradeName || '',
+    holder: item.holder || item.zulassungsinhaber || item.marketingAuthorizationHolder
+            || item.company || '',
+    status: item.status || item.zulassungsstatus || item.registrationStatus || 'Zugelassen'
+  })).filter(p => p.name);
+
+  console.log('[BASG] ' + products.length + ' produits pour: ' + substance);
+  return products;
+}
+
+// ─── Suède — Läkemedelsverket ─────────────────────────────────────────────────
+// SPA Next.js — API REST interne découverte
+// POST /api/lmfrest/searchmedprod avec body {medProdName, status:"4", take:100, skip:0}
+// status "4" = Godkänt (autorisé)
+async function fetchSweden(substance) {
+  const url  = 'https://www.lakemedelsverket.se/api/lmfrest/searchmedprod';
+  const body = { medProdName: substance, status: '4', take: 100, skip: 0 };
+
+  const data = await httpPostJson(url, body, 12000, {
+    'Origin':  'https://www.lakemedelsverket.se',
+    'Referer': 'https://www.lakemedelsverket.se/'
+  });
+
+  const items = Array.isArray(data) ? data
+    : (data && Array.isArray(data.results))  ? data.results
+    : (data && Array.isArray(data.data))     ? data.data
+    : (data && Array.isArray(data.content))  ? data.content
+    : [];
+
+  const products = items.map(item => ({
+    name:   item.productName || item.medProdName || item.tradeName || item.name || '',
+    holder: item.applicantName || item.holder || item.company
+            || item.marketingAuthorizationHolder || '',
+    status: item.statusText || item.status || 'Godkänt'
+  })).filter(p => p.name);
+
+  console.log('[LV] ' + products.length + ' produits pour: ' + substance);
+  return products;
+}
+
+// ─── Pologne — Rejestr Produktów Leczniczych (ezdrowie.gov.pl) ────────────────
+// GET /api/rpl/medicinal-products/search/public?name={term}&subjectRolesIds=1&...
+// Réponse Spring Data Page : {content:[...], totalElements, totalPages, ...}
+async function fetchPoland(substance) {
+  const url = 'https://rejestry.ezdrowie.gov.pl/api/rpl/medicinal-products/search/public'
+    + '?name='                + encodeURIComponent(substance)
+    + '&subjectRolesIds=1'
+    + '&isAdvancedSearch=false'
+    + '&size=100&page=0'
+    + '&sort=name,ASC';
+
+  const data = await httpGetJson(url, 12000, {
+    'Accept':  'application/json',
+    'Origin':  'https://rejestry.ezdrowie.gov.pl',
+    'Referer': 'https://rejestry.ezdrowie.gov.pl/'
+  });
+
+  const items = (data && Array.isArray(data.content)) ? data.content
+    : Array.isArray(data) ? data
+    : [];
+
+  const products = items.map(item => ({
+    name:   item.name || item.tradeName || item.medicinalProductName || '',
+    holder: item.holder || item.marketingAuthorizationHolder
+            || item.applicant || item.company || '',
+    status: item.status || item.registrationStatus || item.decisionType || 'Zarejestrowany'
+  })).filter(p => p.name);
+
+  console.log('[RPL] ' + products.length + ' produits pour: ' + substance);
+  return products;
 }
 
 // ─── Espagne — CIMA REST API v1.23 ───────────────────────────────────────────
@@ -1191,12 +1410,16 @@ exports.handler = async function(event) {
   }
 
   const SOURCES = {
-    fr: { label: 'BDPM / ANSM',              fetch: () => fetchFrance(substance)    },
-    es: { label: 'CIMA / AEMPS',             fetch: () => fetchSpain(substance)     },
-    pt: { label: 'INFARMED',                 fetch: () => fetchPortugal(substance)  },
-    be: { label: 'medicinesdatabase / FAMHP', fetch: () => fetchBelgium(substance)  },
-    de: { label: 'Gelbe Liste / BfArM',       fetch: () => fetchGermany(substance)  },
-    it: { label: 'AIFA',                      fetch: () => fetchItaly(substance)    }
+    fr: { label: 'BDPM / ANSM',              fetch: () => fetchFrance(substance)      },
+    es: { label: 'CIMA / AEMPS',             fetch: () => fetchSpain(substance)       },
+    pt: { label: 'INFARMED',                 fetch: () => fetchPortugal(substance)    },
+    be: { label: 'medicinesdatabase / FAMHP', fetch: () => fetchBelgium(substance)    },
+    de: { label: 'Gelbe Liste / BfArM',       fetch: () => fetchGermany(substance)    },
+    it: { label: 'AIFA',                      fetch: () => fetchItaly(substance)      },
+    nl: { label: 'Geneesmiddelen DB / CBG-MEB', fetch: () => fetchNetherlands(substance) },
+    at: { label: 'BASG Arzneimittel-DB',      fetch: () => fetchAustria(substance)    },
+    se: { label: 'Läkemedelsverket',          fetch: () => fetchSweden(substance)     },
+    pl: { label: 'Rejestr Prod. Leczniczych', fetch: () => fetchPoland(substance)     }
   };
 
   const meta = SOURCES[country];
@@ -1205,7 +1428,7 @@ exports.handler = async function(event) {
   }
 
   // Pays avec une API/données publiques accessibles (null = inaccessible, pas "pas d'API")
-  const HAS_API = new Set(['fr', 'es', 'pt', 'be']);
+  const HAS_API = new Set(['fr', 'es', 'pt', 'be', 'it', 'nl', 'at', 'se', 'pl']);
 
   try {
     const result = await meta.fetch();
