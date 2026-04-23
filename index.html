@@ -753,6 +753,15 @@
       </div>
     </div>
 
+    <!-- EXECUTIVE SUMMARY -->
+    <div class="card" id="exec-summary" style="display:none;margin-bottom:16px">
+      <div class="card-header-bar">
+        <i class="bi bi-lightning-charge-fill"></i>
+        Synthèse exécutive
+      </div>
+      <div id="exec-summary-content" style="padding:16px 20px"></div>
+    </div>
+
     <!-- -- DETAIL TABS -- -->
     <div class="card" style="margin-bottom:16px">
 
@@ -2114,6 +2123,54 @@ function renderResults() {
   mktBar.className = 'sub-kpi-bar-fill';
   document.getElementById('market-source-label').textContent = hasIqvia ? 'Source IQVIA' : 'Non fourni — exclu du composite';
 
+  // ── Synthèse exécutive ──────────────────────────────────────────────────────
+  const execEl = document.getElementById('exec-summary');
+  const execContent = document.getElementById('exec-summary-content');
+  if (execEl && execContent) {
+    execEl.style.display = '';
+    const topFlags = sf.flags.filter(f => f.level === 'danger' || f.level === 'warning').slice(0, 3);
+    const emaTag = state.emaSignal && state.emaSignal !== 'none'
+      ? `<span style="background:rgba(245,158,11,0.12);color:#f59e0b;border:1px solid rgba(245,158,11,0.35);border-radius:4px;padding:2px 8px;font-size:0.72rem;font-weight:700">EMA&nbsp;${state.emaSignal.toUpperCase()}</span>`
+      : '';
+    const euStr = cs.euN != null ? ` · ${cs.euN}&nbsp;EU` : '';
+    const badge = (label, val, col) =>
+      `<span style="background:var(--bg-subtle);border:1px solid var(--border);border-radius:4px;padding:2px 8px;font-size:0.72rem;color:var(--text-muted)">${label}&nbsp;<strong style="color:${col}">${val}</strong></span>`;
+    const kpi = (val, label) =>
+      `<div style="background:var(--bg-subtle);border:1px solid var(--border);border-radius:6px;padding:8px 14px;font-size:0.78rem;min-width:90px">
+        <div style="font-weight:800;color:var(--text);font-size:0.92rem">${val}</div>
+        <div style="color:var(--text-muted);margin-top:1px">${label}</div>
+      </div>`;
+    execContent.innerHTML = `
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px">
+        <div style="display:flex;align-items:baseline;gap:5px">
+          <span style="font-size:2.2rem;font-weight:900;color:${cp.recColor};line-height:1">${cp.score}</span>
+          <span style="font-size:0.85rem;color:var(--text-muted)">/10</span>
+          <span style="font-size:0.88rem;font-weight:700;color:${cp.recColor};margin-left:6px">${cp.rec}</span>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          ${badge('Sécurité', sf.score, scoreColor(sf.score))}
+          ${badge('Concurrence', cs.score, scoreColor(cs.score))}
+          ${hasIqvia ? badge('Marché', ms.score, scoreColor(ms.score)) : ''}
+          ${emaTag}
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:${topFlags.length > 0 ? '14px' : '0'}">
+        ${kpi(fmt(faers.totalReports), 'Rapports FAERS')}
+        ${kpi(cs.n + ' FDA' + euStr, 'Génériques')}
+        ${kpi(fmt(pubmed.recentSafetyPublications), 'Publications récentes')}
+      </div>
+      ${topFlags.length > 0
+        ? `<div style="font-size:0.72rem;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px">Alertes clés</div>
+           <div>${topFlags.map(f => `
+             <div style="display:flex;align-items:flex-start;gap:8px;padding:7px 10px;background:var(--bg-subtle);border:1px solid var(--border);border-radius:6px;margin-bottom:4px;font-size:0.80rem">
+               <span style="flex-shrink:0">${f.emoji}</span>
+               <span><strong style="color:var(--text)">${f.text}</strong><span style="color:var(--text-muted);margin-left:6px">${f.detail}</span></span>
+             </div>`).join('')}</div>`
+        : `<div style="font-size:0.80rem;color:var(--success)">✅ Aucune alerte majeure détectée dans les sources analysées.</div>`
+      }
+    `;
+  }
+
   // Radar chart
   if (state.radarChart) state.radarChart.destroy();
   const ctx = document.getElementById('radarChart').getContext('2d');
@@ -2268,6 +2325,16 @@ async function analyze() {
   // Symptom 1: cancel pending debounced RxNorm call + hide ALL banners (both suggestion + validated)
   clearTimeout(rxnormTimer);
   _analyzeRunning = true;  // suppress any in-flight fetchRxNormSuggestions
+
+  // Safety timeout : si l'analyse est toujours en cours après 20s, forcer la sortie du loader
+  const _safetyTimer = setTimeout(() => {
+    if (_analyzeRunning) {
+      console.warn('[PharmaScout] Timeout global 20s — arrêt forcé du loader');
+      setLoading(false);
+      _analyzeRunning = false;
+      document.getElementById('analyze-btn').disabled = false;
+    }
+  }, 20000);
   document.getElementById('rxnorm-suggestion').style.display = 'none';
   document.getElementById('rxnorm-validated').style.display = 'none';
   document.getElementById('rxnorm-dropdown').style.display = 'none';
@@ -2361,11 +2428,13 @@ async function analyze() {
     state.marketScore = calcMarket(state.iqvia);
     state.composite = calcComposite(state.safetyScore, state.competitionScore, state.marketScore, ws, wc, wm);
 
+    clearTimeout(_safetyTimer);
     setLoading(false);
     _analyzeRunning = false;
     renderResults();
 
   } catch(err) {
+    clearTimeout(_safetyTimer);
     setLoading(false);
     _analyzeRunning = false;
     alert('Erreur lors de l\'analyse : ' + err.message + '\nVérifiez votre connexion internet.');
